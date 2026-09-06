@@ -30,6 +30,12 @@ export const transactionsRepo = {
     return mapRow(rows[0]) ?? null;
   },
 
+  /** Every transaction born from the same proposal — the edges of one TTC cycle (or the single edge of a queue match). */
+  async findByProposalId(tx, proposalId) {
+    const { rows } = await tx.query('SELECT * FROM transactions WHERE proposal_id = $1', [proposalId]);
+    return rows.map(mapRow);
+  },
+
   async findOpenByGuild(tx, guildId) {
     const { rows } = await tx.query(
       `SELECT * FROM transactions WHERE guild_id = $1 AND status NOT IN (${TERMINAL_STATUSES.map((_, i) => `$${i + 2}`).join(', ')})`,

@@ -208,3 +208,80 @@ test('echange: a mutual 2-cycle runs end-to-end to TRANSFERRED on both edges', a
   assert.equal(finalA.status, 'TRANSFERRED');
   assert.equal(finalB.status, 'TRANSFERRED');
 });
+
+test('cancelling one edge of a 3-party cycle cascades to every sibling edge', async () => {
+  const userA = await makeUser('cycle3-a');
+  const userB = await makeUser('cycle3-b');
+  const userC = await makeUser('cycle3-c');
+  const guildA = await makeOwnedGuild(userA, 'cycle3-guild-a');
+  const guildB = await makeOwnedGuild(userB, 'cycle3-guild-b');
+  const guildC = await makeOwnedGuild(userC, 'cycle3-guild-c');
+
+  // A -> B -> C -> A: each listing has exactly one acceptable candidate, forming one
+  // deterministic 3-cycle (no other combination scores above zero).
+  await withTransaction(pool, (tx) =>
+    listings.create(tx, userA.id, {
+      guildId: guildA,
+      mode: 'echange',
+      description: 'Communaute A du cycle a trois, vingt caracteres.',
+      tags: ['alpha'],
+      seekingTags: ['beta'],
+    }),
+  );
+  await withTransaction(pool, (tx) =>
+    listings.create(tx, userB.id, {
+      guildId: guildB,
+      mode: 'echange',
+      description: 'Communaute B du cycle a trois, vingt caracteres.',
+      tags: ['beta'],
+      seekingTags: ['gamma'],
+    }),
+  );
+  await withTransaction(pool, (tx) =>
+    listings.create(tx, userC.id, {
+      guildId: guildC,
+      mode: 'echange',
+      description: 'Communaute C du cycle a trois, vingt caracteres.',
+      tags: ['gamma'],
+      seekingTags: ['alpha'],
+    }),
+  );
+
+  const roundResult = await engine.runRound(pool);
+  assert.equal(roundResult.cyclesFound, 1);
+  assert.equal(roundResult.proposalsCreated, 1);
+
+  const [proposal] = await withTransaction(pool, (tx) => matchRepo.findOpenProposalsForUser(tx, userA.id));
+  assert.ok(proposal);
+  await withTransaction(pool, (tx) => engine.accept(tx, userA.id, proposal.id));
+  await withTransaction(pool, (tx) => engine.accept(tx, userB.id, proposal.id));
+  const finalAccept = await withTransaction(pool, (tx) => engine.accept(tx, userC.id, proposal.id));
+  assert.equal(finalAccept.allAccepted, true);
+
+  const txAB = await withTransaction(pool, (tx) => transactionsRepo.findOpenByGuild(tx, guildA));
+  const txBC = await withTransaction(pool, (tx) => transactionsRepo.findOpenByGuild(tx, guildB));
+  const txCA = await withTransaction(pool, (tx) => transactionsRepo.findOpenByGuild(tx, guildC));
+  assert.equal(txAB.proposalId, txBC.proposalId);
+  assert.equal(txAB.proposalId, txCA.proposalId);
+
+  for (const t of [txAB, txBC, txCA]) {
+    await withTransaction(pool, (tx) => trial.confirmTrialStarted(tx, t.id, `fake-role-${t.id}`));
+  }
+
+  // A backs out of just their own edge — every edge of the cycle must cancel, not just this one.
+  await withTransaction(pool, (tx) => trial.cancel(tx, userA.id, txAB.id, 'user_requested'));
+
+  const cancelledAB = await withTransaction(pool, (tx) => transactionsRepo.findById(tx, txAB.id));
+  const cancelledBC = await withTransaction(pool, (tx) => transactionsRepo.findById(tx, txBC.id));
+  const cancelledCA = await withTransaction(pool, (tx) => transactionsRepo.findById(tx, txCA.id));
+  assert.equal(cancelledAB.status, 'CANCELLED');
+  assert.equal(cancelledBC.status, 'CANCELLED');
+  assert.equal(cancelledCA.status, 'CANCELLED');
+
+  const listingA = await withTransaction(pool, (tx) => listingsRepo.findActiveByGuild(tx, guildA));
+  const listingB = await withTransaction(pool, (tx) => listingsRepo.findActiveByGuild(tx, guildB));
+  const listingC = await withTransaction(pool, (tx) => listingsRepo.findActiveByGuild(tx, guildC));
+  assert.ok(listingA, 'guild A listing should be active again');
+  assert.ok(listingB, 'guild B listing should be active again');
+  assert.ok(listingC, 'guild C listing should be active again');
+});

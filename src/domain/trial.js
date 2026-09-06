@@ -184,14 +184,7 @@ export async function validate(tx, userId, transactionId) {
   return updated;
 }
 
-/**
- * Cancels a transaction still in PROPOSED/ACCEPTED/TRIAL. `actorId` is
- * either party, or `'bot'`/`'system'` for automated cancellations
- * (`TRIAL_RECIPIENT_REMOVED`, `TRIAL_ROLE_REMOVED`, trial expiry's sibling
- * path). Revokes the trial role if one was assigned, and releases the
- * underlying listing back to `active`.
- */
-export async function cancel(tx, actorId, transactionId, reason) {
+async function cancelOne(tx, actorId, transactionId, reason) {
   const transaction = await transactionsRepo.lockById(tx, transactionId);
   if (!transaction) throw new TrialError('NOT_FOUND', 'Transaction not found');
   if (!['system', 'bot'].includes(actorId) && transaction.fromUserId !== actorId && transaction.toUserId !== actorId) {
@@ -213,6 +206,38 @@ export async function cancel(tx, actorId, transactionId, reason) {
   }
   await restoreListingForTransaction(tx, transaction);
   return updated;
+}
+
+/**
+ * Cancels a transaction still in PROPOSED/ACCEPTED/TRIAL. `actorId` is
+ * either party, or `'bot'`/`'system'` for automated cancellations
+ * (`TRIAL_RECIPIENT_REMOVED`, `TRIAL_ROLE_REMOVED`, trial expiry's sibling
+ * path). Revokes the trial role if one was assigned, and releases the
+ * underlying listing back to `active`.
+ *
+ * A cycle's fairness (TTC's core-allocation guarantee) only holds if every
+ * edge happens together: cancelling one edge of a 3+-party cycle without
+ * cancelling the rest would strand a party who already gave up what they
+ * were promised while still owing their own guild. So this cascades to
+ * every sibling transaction born from the same proposal — a sibling that
+ * can no longer legally reach CANCELLED (already TRANSFERRED, or already
+ * terminal on its own) is left untouched, not forced backwards.
+ */
+export async function cancel(tx, actorId, transactionId, reason) {
+  const cancelled = await cancelOne(tx, actorId, transactionId, reason);
+
+  const siblings = await transactionsRepo.findByProposalId(tx, cancelled.proposalId);
+  for (const sibling of siblings) {
+    if (sibling.id === transactionId) continue;
+    try {
+      await cancelOne(tx, 'system', sibling.id, `cascade:${reason}`);
+    } catch (err) {
+      if (err instanceof TrialError && err.code === 'ERR_BAD_TRANSITION') continue; // already resolved on its own
+      throw err;
+    }
+  }
+
+  return cancelled;
 }
 
 /** `jobs.trialExpiry`: a trial past `trial_ends_at` without double validation. */
@@ -240,6 +265,21 @@ export async function expire(tx, transactionId) {
       payload: { transactionId },
     });
   }
+
+  // Same cycle-fairness cascade as cancel(): one edge timing out must not strand the
+  // other edges of a 3+-party cycle mid-trade. Those edges are cancelled, not expired
+  // themselves — their own clock didn't run out, this one's did.
+  const siblings = await transactionsRepo.findByProposalId(tx, transaction.proposalId);
+  for (const sibling of siblings) {
+    if (sibling.id === transactionId) continue;
+    try {
+      await cancelOne(tx, 'system', sibling.id, 'cascade:TRIAL_EXPIRED');
+    } catch (err) {
+      if (err instanceof TrialError && err.code === 'ERR_BAD_TRANSITION') continue;
+      throw err;
+    }
+  }
+
   return updated;
 }
 
