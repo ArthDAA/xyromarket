@@ -37,6 +37,10 @@ La liste de tables du bloc `db/migrations` (§ Outputs) n'est pas exhaustive au 
 
 `match_cooldowns` ajoutée à `001_init.sql` (paire d'utilisateurs + `until`) : nécessaire pour implémenter la garantie A18/`engine.js` ("cooldown 24h entre les mêmes parties" après dissolution d'un cycle), aucune table de ce type n'étant nommée dans le contrat.
 
+## 2026-09-06 [domain/audit.js - sel de hachage IP]
+
+Le contrat demande "Hacher l'IP (SHA-256 + sel serveur)" mais ne nomme aucun secret dédié dans `config/env.js` pour ce sel (seuls `SESSION_SECRET` et `TOKEN_ENC_KEY` existent, chacun à racine unique pour son usage propre). Décision : dériver le sel de hachage IP de `SESSION_SECRET` via HMAC-SHA256 plutôt que d'ajouter une troisième variable d'environnement. Justification : la règle "une racine par usage" du contrat visait explicitement à isoler signature de session et chiffrement de jetons OAuth (compromission de l'une n'expose pas l'autre) ; le hachage d'IP à des fins d'audit n'a pas cette même exigence d'isolation (ce n'est pas un secret déchiffrable, juste un sel anti-rainbow-table), donc réutiliser `SESSION_SECRET` ne viole pas la garantie telle qu'énoncée. Fonction exportée `audit.hashIp(ip)` — les appelants (pipeline de requêtes web) hachent l'IP avant d'appeler `record`, qui ne stocke que le hash.
+
 ## 2026-09-06 [Setup initial]
 
 - Repo non existant au démarrage de Phase III (pas de `.git`, pas de `package.json`). Scaffold créé : `package.json` (ESM, `"type": "module"`), ESLint + Prettier, `.gitignore`, `git init`.
