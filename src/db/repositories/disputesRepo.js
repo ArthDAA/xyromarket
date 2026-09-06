@@ -2,7 +2,7 @@ import { mapPgError, mapRow } from './shared.js';
 
 /** Data access for the `disputes` aggregate. `timeline` is append-only JSONB. */
 export const disputesRepo = {
-  async insert(tx, { transactionId, openedBy, reason }) {
+  async insert(tx, { transactionId, openedBy, reason, body = '' }) {
     try {
       const { rows } = await tx.query(
         `INSERT INTO disputes (transaction_id, opened_by, reason, timeline)
@@ -12,7 +12,7 @@ export const disputesRepo = {
           transactionId,
           openedBy,
           reason,
-          JSON.stringify([{ at: new Date().toISOString(), actorId: openedBy, event: 'opened', reason }]),
+          JSON.stringify([{ at: new Date().toISOString(), actorId: openedBy, event: 'opened', reason, body }]),
         ],
       );
       return mapRow(rows[0]);
@@ -47,6 +47,15 @@ export const disputesRepo = {
       id,
       status,
     ]);
+    return mapRow(rows[0]) ?? null;
+  },
+
+  /** Records the decided outcome without closing the dossier yet — used for `return_expected`, which stays open until `confirmReturn`. */
+  async setPendingOutcome(tx, id, { outcome, resolution, resolvedBy }) {
+    const { rows } = await tx.query(
+      `UPDATE disputes SET outcome = $2, resolution = $3, resolved_by = $4 WHERE id = $1 RETURNING *`,
+      [id, outcome, resolution, resolvedBy],
+    );
     return mapRow(rows[0]) ?? null;
   },
 

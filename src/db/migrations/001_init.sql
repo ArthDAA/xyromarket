@@ -350,6 +350,13 @@ CREATE TRIGGER outbox_notify_trigger
 
 -- ==================== SEED ====================
 
+-- Well-known system actor for automated reports (reports.reporter_id is a
+-- NOT NULL FK — audit_log's actor_id, by contrast, is plain TEXT and uses
+-- the literal 'system'/'bot' directly, no FK, no seed row needed there).
+INSERT INTO users (id, discord_id, username)
+VALUES ('00000000-0000-0000-0000-000000000000', 'system', 'Xyro Market (système)')
+ON CONFLICT (id) DO NOTHING;
+
 INSERT INTO settings (key, value) VALUES
   ('trial_duration_days', '7'),
   ('dispute_window_days', '14'),

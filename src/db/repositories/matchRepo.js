@@ -34,6 +34,16 @@ export const matchRepo = {
     return { proposal: mapRow(proposalRows[0]), participants: participantRows.map(mapRow) };
   },
 
+  async findOpenProposalsForUser(tx, userId) {
+    const { rows } = await tx.query(
+      `SELECT DISTINCT mp.* FROM match_proposals mp
+       INNER JOIN match_participants pt ON pt.proposal_id = mp.id
+       WHERE pt.user_id = $1 AND mp.status = 'open'`,
+      [userId],
+    );
+    return rows.map(mapRow);
+  },
+
   async findOpenProposalForListing(tx, listingId) {
     const { rows } = await tx.query(
       `SELECT mp.* FROM match_proposals mp

@@ -59,6 +59,14 @@ export const listingQueueRepo = {
     return mapRow(rows[0]) ?? null;
   },
 
+  /** Withdraws a sanctioned user from every queue they're active on. */
+  async withdrawAllForUser(tx, candidateUserId) {
+    await tx.query(
+      'UPDATE listing_queue SET withdrawn_at = now() WHERE candidate_user_id = $1 AND withdrawn_at IS NULL',
+      [candidateUserId],
+    );
+  },
+
   async withdraw(tx, listingId, candidateUserId) {
     const { rows } = await tx.query(
       `UPDATE listing_queue SET withdrawn_at = now()

@@ -232,6 +232,22 @@ export async function expire(tx, transactionId) {
   return updated;
 }
 
+/** Opens a post-transfer dispute — called by `dispute.open`, never writes `transactions.status` elsewhere. */
+export async function openDispute(tx, transactionId) {
+  const transaction = await transactionsRepo.lockById(tx, transactionId);
+  if (!transaction) throw new TrialError('NOT_FOUND', 'Transaction not found');
+  return applyTransition(tx, transaction, 'DISPUTED', { actorId: 'system' });
+}
+
+/** Terminal close — either the dispute window elapsed uneventfully, or a dispute resolved. */
+export async function close(tx, transactionId) {
+  const transaction = await transactionsRepo.lockById(tx, transactionId);
+  if (!transaction) throw new TrialError('NOT_FOUND', 'Transaction not found');
+  if (transaction.status === 'CLOSED') return transaction; // idempotent
+  await applyTransition(tx, transaction, 'CLOSED', { actorId: 'system' });
+  return transactionsRepo.setClosed(tx, transactionId, new Date());
+}
+
 /**
  * The only path to TRANSFERRED — driven exclusively by `transfer.js`
  * reacting to an `ownership.js` observation, never by a party's declaration.

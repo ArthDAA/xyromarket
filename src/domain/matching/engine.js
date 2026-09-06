@@ -23,7 +23,8 @@ function pairKey(a, b) {
   return [a, b].sort().join(':');
 }
 
-async function dissolveProposal(tx, proposal, participants, terminalStatus) {
+/** Exported for `moderation.sanction`, which must dissolve a sanctioned user's open proposals too. */
+export async function dissolveProposal(tx, proposal, participants, terminalStatus) {
   await matchRepo.setProposalStatus(tx, proposal.id, terminalStatus);
   const listingIds = [...new Set(participants.map((p) => p.listingId))];
   for (const listingId of listingIds) {
