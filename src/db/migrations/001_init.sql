@@ -44,6 +44,7 @@ CREATE TABLE users (
   banned_until TIMESTAMPTZ,
   banned_permanently BOOLEAN NOT NULL DEFAULT false,
   is_verified BOOLEAN NOT NULL DEFAULT false,
+  deletion_requested_at TIMESTAMPTZ,
   deleted_at TIMESTAMPTZ
 );
 
@@ -347,6 +348,22 @@ CREATE TRIGGER outbox_notify_trigger
   AFTER INSERT ON outbox
   FOR EACH ROW
   EXECUTE FUNCTION outbox_notify();
+
+-- ==================== STATS ====================
+
+-- Backs domain/stats.js's time-series metrics. The contract calls for
+-- "vues matérialisées mv_stats_*" — this cache table plays the same role
+-- (single definition per metric, explicit computed_at/staleness,
+-- non-blocking refresh) without requiring a hand-maintained UNIQUE index
+-- and REFRESH CONCURRENTLY wiring per metric; see DebugNotes for why this
+-- substitution was made.
+CREATE TABLE stats_cache (
+  metric TEXT NOT NULL,
+  bucket_date DATE NOT NULL,
+  value NUMERIC NOT NULL,
+  computed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (metric, bucket_date)
+);
 
 -- ==================== SEED ====================
 

@@ -69,6 +69,15 @@ export const reviewsRepo = {
     });
   },
 
+  /** Reviews this user authored — used by `gdpr.exportData`. */
+  async listByAuthor(tx, authorId, { limit = 1000 } = {}) {
+    const { rows } = await tx.query(
+      'SELECT * FROM reviews WHERE author_id = $1 ORDER BY created_at DESC LIMIT $2',
+      [authorId, limit],
+    );
+    return rows.map(mapRow);
+  },
+
   async history(tx, userId, { limit = 20, cursor } = {}) {
     return paginateKeyset(tx, {
       selectSql: 'SELECT * FROM reviews WHERE target_id = $1 AND hidden_at IS NULL',

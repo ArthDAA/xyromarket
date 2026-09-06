@@ -46,6 +46,16 @@ export const transactionsRepo = {
     return rows.map(mapRow);
   },
 
+  /** Completed (TRANSFERRED or CLOSED) transactions involving `userId`, either side. */
+  async countCompletedByUser(tx, userId) {
+    const { rows } = await tx.query(
+      `SELECT count(*)::int AS count FROM transactions
+       WHERE (from_user_id = $1 OR to_user_id = $1) AND status IN ('TRANSFERRED', 'CLOSED')`,
+      [userId],
+    );
+    return rows[0].count;
+  },
+
   async listByUser(tx, userId, { limit = 20, cursor } = {}) {
     return paginateKeyset(tx, {
       selectSql: 'SELECT * FROM transactions WHERE from_user_id = $1 OR to_user_id = $1',

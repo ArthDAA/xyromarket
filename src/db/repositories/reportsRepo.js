@@ -34,6 +34,15 @@ export const reportsRepo = {
     });
   },
 
+  /** Reports this user filed — used by `gdpr.exportData`. */
+  async listByReporter(tx, reporterId, { limit = 1000 } = {}) {
+    const { rows } = await tx.query(
+      'SELECT * FROM reports WHERE reporter_id = $1 ORDER BY created_at DESC LIMIT $2',
+      [reporterId, limit],
+    );
+    return rows.map(mapRow);
+  },
+
   async assign(tx, id, assigneeId) {
     const { rows } = await tx.query(
       "UPDATE reports SET assignee_id = $2, status = 'assigned' WHERE id = $1 RETURNING *",

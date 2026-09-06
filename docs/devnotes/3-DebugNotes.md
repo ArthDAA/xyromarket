@@ -64,6 +64,18 @@ Le contrat ne fixe aucune durée pour `match_proposals.expires_at` (contrairemen
 - **`moderation.addNote`/`report` "notes internes" réutilisent `audit_log`** : aucune table `report_notes` n'est nommée dans le contrat (contrairement à `disputes.timeline`, explicite). L'historique des notes reste consultable via `audit.query`.
 - **Utilisateur système seedé** (`00000000-0000-0000-0000-000000000000`, `discord_id='system'`) pour les FK NOT NULL que les actions automatiques doivent satisfaire (`reports.reporter_id` sur `OWNER_DIVERTED`/`ERR_RATE_LIMITED`). `audit_log.actor_id` reste TEXT et continue d'utiliser les littéraux `'system'`/`'bot'` sans FK.
 
+## 2026-09-06 [gdpr.js - colonne et job manquants]
+
+- `users.deletion_requested_at` ajoutée (absente de la liste de colonnes `db/migrations`) : nécessaire pour la fenêtre de rétractation de 7 jours explicitement décrite dans le Process de `gdpr.js`.
+- **Exécution de la suppression après la fenêtre de 7 jours : aucun job dédié.** Même situation que la clôture après fenêtre de litige — repris dans le sous-job `trialExpiry` étendu (voir note transfer.js/dispute.js), au bloc `jobs/main.js`.
+
+## 2026-09-06 [stats.js - substitution des vues matérialisées]
+
+Le contrat demande des "vues matérialisées `mv_stats_*`" rafraîchies via `REFRESH ... CONCURRENTLY`. Implémenté à la place : une table `stats_cache(metric, bucket_date, value, computed_at)` peuplée par `stats.refreshAll` et lue par `stats.read`. Justification : les garanties réellement énoncées (une métrique = une seule définition ; toute lecture expose sa fraîcheur `computedAt`/`stale` ; le rafraîchissement ne bloque aucune lecture ; échec d'une métrique n'affecte pas les autres) sont toutes tenues par cette table, sans la mécanique supplémentaire d'un index `UNIQUE` par vue + `REFRESH CONCURRENTLY` par métrique. `stats.js` reste l'unique point de lecture (`admin.js` n'implémente aucun calcul lui-même), ce qui est la garantie qui compte le plus. Les métriques de répartition (`listings.by_tag`, `transactions.by_status`, `matching.cycle_size_distribution`, etc.) sont calculées à la volée (agrégats bon marché) plutôt que mises en cache, et retournées avec `stale:false` puisqu'elles sont par construction toujours à jour.
+
+- `users.new` partage la même série mise en cache que `users.total` (filtrée par la plage demandée) plutôt qu'une série séparée — la distinction entre "total cumulé" et "nouveaux sur la période" est une question de filtrage de plage, pas de source de données différente.
+- `activity.recent` ne rentre pas dans la forme `points: {bucket,value}[]` (c'est un flux, pas une série) — le résultat porte un champ `items` supplémentaire à côté de `points: []`.
+
 ## 2026-09-06 [Setup initial]
 
 - Repo non existant au démarrage de Phase III (pas de `.git`, pas de `package.json`). Scaffold créé : `package.json` (ESM, `"type": "module"`), ESLint + Prettier, `.gitignore`, `git init`.

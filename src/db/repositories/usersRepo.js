@@ -47,6 +47,26 @@ export const usersRepo = {
     return mapRow(rows[0]) ?? null;
   },
 
+  async requestDeletion(tx, id) {
+    const { rows } = await tx.query(
+      'UPDATE users SET deletion_requested_at = now() WHERE id = $1 AND deletion_requested_at IS NULL RETURNING *',
+      [id],
+    );
+    return mapRow(rows[0]) ?? null;
+  },
+
+  /** Accounts whose 7-day retraction window has elapsed and are not yet pseudonymized. */
+  async findDueForDeletion(tx, retractionWindowMs) {
+    const { rows } = await tx.query(
+      `SELECT * FROM users
+       WHERE deletion_requested_at IS NOT NULL
+         AND deletion_requested_at < $1
+         AND deleted_at IS NULL`,
+      [new Date(Date.now() - retractionWindowMs)],
+    );
+    return rows.map(mapRow);
+  },
+
   /**
    * GDPR pseudonymization: replaces the Discord identity with a
    * non-reversible opaque token, clears display data, marks `deleted_at`.
