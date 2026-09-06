@@ -90,7 +90,7 @@ export default async function publicRoutes(app, { pool }) {
         expires: expiresAt,
       });
       reply.header('X-Csrf-Token', session.issueCsrfToken(csrfSecret));
-      reply.redirect('/me');
+      reply.redirect('/tableau-de-bord');
     } catch (err) {
       req.log.warn({ err }, 'oauth callback failed');
       reply.code(400).type('text/html').send(layout({ title: 'Connexion échouée', body: '<h1>Connexion échouée</h1>' }));
