@@ -107,11 +107,21 @@ export default async function publicRoutes(app, { pool }) {
     reply.redirect('/');
   });
 
-  app.get('/', async (_req, reply) => {
+  app.get('/', { preHandler: [session.tryAuth(pool)] }, async (req, reply) => {
+    const accountLine = req.user
+      ? `Connecté en tant que <strong>${escapeHtml(req.user.username)}</strong> ·
+         <a href="/tableau-de-bord">Mon tableau de bord</a> ·
+         <form method="POST" action="/auth/logout" style="display:inline">
+           <button type="submit">Se déconnecter</button>
+         </form>`
+      : `<a href="/auth/discord">Se connecter avec Discord</a>`;
+
     reply.type('text/html').send(
       layout({
         title: 'Accueil',
-        body: `<h1>Xyro Market</h1><p>Échangez ou donnez votre serveur Discord.</p><p><a href="/annonces">Voir les annonces</a></p>`,
+        body: `<h1>Xyro Market</h1>
+<p>Échangez ou donnez votre serveur Discord.</p>
+<p><a href="/annonces">Voir les annonces</a> · ${accountLine}</p>`,
       }),
     );
   });

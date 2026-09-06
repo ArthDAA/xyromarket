@@ -76,6 +76,19 @@ test('ENV_INVALID rejects a non-https PUBLIC_BASE_URL without leaking secret val
   assert.ok(!err.message.includes(validEnv.DISCORD_BOT_TOKEN));
 });
 
+test('PUBLIC_BASE_URL allows http:// for localhost only (Fastify has no local TLS cert)', () => {
+  const localhost = parseConfig({ ...validEnv, PUBLIC_BASE_URL: 'http://localhost:3000' });
+  assert.equal(localhost.publicBaseUrl, 'http://localhost:3000');
+
+  const loopback = parseConfig({ ...validEnv, PUBLIC_BASE_URL: 'http://127.0.0.1:3000' });
+  assert.equal(loopback.publicBaseUrl, 'http://127.0.0.1:3000');
+
+  assert.throws(
+    () => parseConfig({ ...validEnv, PUBLIC_BASE_URL: 'http://localhost.evil.com' }),
+    (err) => err instanceof ConfigError && err.code === 'ENV_INVALID',
+  );
+});
+
 test('ENV_INVALID rejects a TOKEN_ENC_KEY that is not exactly 32 bytes', () => {
   const env = { ...validEnv, TOKEN_ENC_KEY: Buffer.alloc(16, 1).toString('base64') };
   const err = assertThrowsConfigError(() => parseConfig(env));

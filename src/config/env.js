@@ -52,7 +52,21 @@ const schema = z.object({
   PUBLIC_BASE_URL: z
     .string()
     .url('must be a valid URL')
-    .refine((v) => v.startsWith('https://'), { message: 'must use https' }),
+    .refine(
+      (v) => {
+        // https is required everywhere except localhost, which can never be a real
+        // production deployment target anyway — this only ever helps local dev,
+        // where Fastify has no TLS cert to actually terminate an https:// callback.
+        try {
+          const { protocol, hostname } = new URL(v);
+          const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+          return protocol === 'https:' || (protocol === 'http:' && isLocalhost);
+        } catch {
+          return false;
+        }
+      },
+      { message: 'must use https (http allowed only for localhost)' },
+    ),
   NODE_ENV: z.enum(['development', 'production']).default('development'),
   WEB_PORT: z.coerce.number().int().min(0).max(65535).default(3000),
   LOG_LEVEL: z

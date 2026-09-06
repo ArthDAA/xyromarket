@@ -87,6 +87,37 @@ export function requireAuth(pool) {
   };
 }
 
+/**
+ * Best-effort session read for public pages that adapt their content to
+ * login state (e.g. the homepage showing "Se connecter" vs "Se déconnecter")
+ * without forcing a redirect the way `requireAuth` does. Sets `req.user` if
+ * a valid session exists, otherwise leaves it `undefined` — never blocks.
+ */
+export function tryAuth(pool) {
+  return async function tryAuthHandler(req) {
+    const raw = req.cookies?.[SESSION_COOKIE];
+    const unsigned = raw ? req.unsignCookie(raw) : null;
+    if (!unsigned?.valid) return;
+
+    const result = await withTransaction(pool, async (tx) => {
+      const session = await sessionsRepo.findValid(tx, unsigned.value);
+      if (!session) return null;
+      const user = await usersRepo.findById(tx, session.userId);
+      if (!user || user.deletedAt) return null;
+      return { user };
+    });
+
+    if (result) {
+      req.user = {
+        id: result.user.id,
+        discordId: result.user.discordId,
+        username: result.user.username,
+        isVerified: result.user.isVerified,
+      };
+    }
+  };
+}
+
 /** Composes `requireAuth` with an RBAC gate. Never compares a role name — always `rbac.can`. */
 export function requirePermission(pool, permission) {
   const authHandler = requireAuth(pool);

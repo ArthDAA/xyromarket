@@ -5,6 +5,7 @@ import Fastify from 'fastify';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import cookie from '@fastify/cookie';
+import formbody from '@fastify/formbody';
 import fastifyStatic from '@fastify/static';
 import { Config } from '../config/env.js';
 import { createPool, closePool } from '../db/pool.js';
@@ -44,6 +45,7 @@ async function main() {
   });
   await app.register(rateLimit, { max: 100, timeWindow: '1 minute' });
   await app.register(cookie, { secret: Config.sessionSecret, parseOptions: {} });
+  await app.register(formbody); // plain <form> submissions (no inline JS needed, CSP stays unsafe-inline-free)
   await app.register(fastifyStatic, {
     root: path.join(path.dirname(fileURLToPath(import.meta.url)), 'public'),
     prefix: '/static/',
