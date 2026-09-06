@@ -143,7 +143,6 @@ function boot() {
     return parseConfig(process.env);
   } catch (err) {
     if (err instanceof ConfigError) {
-      // eslint-disable-next-line no-console
       console.error(`[FATAL] ${err.code}: ${err.message}`);
       process.exit(1);
     }
@@ -151,4 +150,21 @@ function boot() {
   }
 }
 
-export const Config = boot();
+let cachedConfig = null;
+
+/**
+ * `Config` is a lazy singleton: `boot()` only runs the first time a
+ * property is actually read, not at import time. This keeps importing
+ * `parseConfig`/`ConfigError` for testing side-effect-free, while every
+ * real code path (which always reads at least one field before doing
+ * anything) still gets the fail-fast boot behavior on its first touch.
+ */
+export const Config = new Proxy(
+  {},
+  {
+    get(_target, prop) {
+      if (!cachedConfig) cachedConfig = boot();
+      return cachedConfig[prop];
+    },
+  },
+);

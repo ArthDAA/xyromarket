@@ -111,7 +111,23 @@ Conformément au gabarit du prompt Phase III, `trial.expire`, `dispute.open` et 
 
 `src/integration.dbtest.js` : don (file d'attente) et échange (cycle TTC à 2) de bout en bout jusqu'à `TRANSFERRED`, conformément au point 10 du contrat. Le bus `LISTEN`/`NOTIFY` n'est pas exercé (aucun process bot ne tourne dans ce test) — les confirmations que `bot/trialRole.js` ferait normalement (`trial.confirmTrialStarted`) et l'observation de bascule que `jobs.ownershipSweep`/`bot/guildWatcher.js` ferait normalement (`transfer.onOwnershipChanged`) sont appelées directement, en process, ce qui est exactement le point d'intégration réel entre le bot et le domaine tel que conçu dans ce Phase III (cf. notes trial.js/bot plus haut : ces confirmations sont des appels directs, pas des événements de bus). Ce qui est vérifié ici est le comportement domaine/repositories de bout en bout — la plomberie du bus elle-même n'a pas de logique propre à tester à ce niveau.
 
-## 2026-09-06 [Bilan de vérification - à faire dès Node.js disponible]
+## 2026-09-06 [Vérification réelle - Node.js + Docker disponibles, bugs trouvés et corrigés]
+
+Node.js et Docker installés en cours de session. `npm install`, `npm run lint`, `npm test` et `npm run test:db` (Postgres 16 jetable via Docker) exécutés réellement pour la première fois. Résultat final : **21/21 tests passent, lint propre**. Bugs réels trouvés et corrigés pendant cette passe (aucun n'était détectable par relecture seule) :
+
+- **`config/env.js`** : `export const Config = boot();` s'exécutait à l'import du module — importer seulement `parseConfig`/`ConfigError` pour les tester déclenchait quand même le vrai boot (et son `process.exit(1)`) faute de variables d'environnement réelles, tuant le fichier de test avant la première assertion. Corrigé : `Config` est maintenant un `Proxy` paresseux, `boot()` ne s'exécute qu'au premier accès réel à une propriété — l'import seul reste sans effet de bord.
+- **`config/env.test.js`** : `assert.throws(fn, ConfigError)` de `node:assert` ne retourne PAS l'erreur (contrairement à d'autres frameworks) — trois tests lisaient `.code` sur `undefined`. Corrigé avec un helper `try/catch` dédié.
+- **`eslint.config.js`** : liste de globals Node incomplète (`Buffer`, `fetch`, `setTimeout`/`setInterval`/`clearTimeout`/`clearInterval`, `URLSearchParams` manquants) → 34 fausses erreurs `no-undef` sur du code par ailleurs correct. Complété.
+- **`db/migrations/run.js`** : la détection "suis-je le point d'entrée CLI" (`import.meta.url === \`file://${process.argv[1]}\``) ne correspond jamais sur Windows (séparateurs `\`, pas d'encodage URL, absence du triple-slash) — `npm run migrate` ne faisait donc **rien du tout**, silencieusement, exit 0. Corrigé avec `pathToFileURL(process.argv[1]).href`.
+- **`listPublic.explain.dbtest.js`** — plusieurs problèmes de fixture, aucun dans le code applicatif :
+  - Cast manquant `text` -> `listing_mode`/`listing_status` dans le `CASE` du seed, rejeté par Postgres.
+  - Le fixture de 100 000 lignes n'était jamais nettoyé après le test : `engine.runRound` du test d'intégration (fichier séparé, même base) récupérait 50 000+ annonces `active` parasites et calculait les préférences en O(n²) dessus — perçu d'abord à tort comme un deadlock (des minutes de blocage) avant diagnostic par traçage. Corrigé avec un nettoyage en `after()`.
+  - `node --test` exécute les fichiers de test **en parallèle** par défaut (processus séparés) : les deux fichiers `.dbtest.js` étant sur la même base, ils se sont fait la course sur la migration initiale d'une base fraîche (l'un `skip` car verrou déjà pris, alors que l'autre n'avait pas fini de créer le schéma) → `relation "users" does not exist`. Inoffensif en production (la migration est une étape de déploiement explicite et unique, jamais lancée en parallèle par plusieurs process), mais cassait la fiabilité des tests. Corrigé avec `--test-concurrency=1` sur le script `test:db`.
+  - Les 100 000 lignes générées en une seule requête `generate_series` partageaient quasiment le même `created_at` (un seul `now()` pour toute l'instruction), ce qui empêchait l'index composite `(status, mode, created_at DESC)` de court-circuiter `ORDER BY ... LIMIT` (égalités multiples sur la clé de tri). Corrigé en étalant les timestamps (`now() - (i || ' seconds')::interval`) — reflète aussi mieux la réalité (les annonces ne sont jamais toutes créées à l'instant précis).
+  - Sélectivité du terme de recherche plein texte ajustée de 4 % à ~0,5 % des lignes : à 4 %, Postgres choisit légitimement un Seq Scan (coût d'E/S aléatoire d'un bitmap heap scan supérieur à un balayage séquentiel) — comportement correct du planificateur, pas un défaut d'index ; un terme de recherche réaliste est plus rare.
+- **Trouvaille annexe, non corrigée (hors périmètre code applicatif)** : supprimer 100 000 lignes de `guilds` a pris 53 s dans le fixture de test, à cause des vérifications `RESTRICT` séquentielles sur `transactions.guild_id`/`ownership_events.guild_id` (non indexées). Sans conséquence en production — aucun chemin applicatif ne supprime jamais une ligne `guilds` (cf. `domain/gdpr.js`, pseudonymisation uniquement) — donc non corrigé dans le schéma ; le nettoyage du fixture évite simplement de supprimer les guildes de test.
+
+## 2026-09-06 [Bilan de vérification - à faire dès Node.js disponible] — RÉSOLU, voir l'entrée du dessus
 
 L'intégralité du code de ce Phase III (32 blocs BIOPGE) a été écrite sans pouvoir exécuter `npm install` ni aucun test — Node.js était absent de la machine tout au long de l'implémentation. **Avant de considérer un seul bloc comme validé au sens du contrat**, il reste à faire, dans l'ordre :
 1. `npm install`
@@ -119,6 +135,8 @@ L'intégralité du code de ce Phase III (32 blocs BIOPGE) a été écrite sans p
 3. `npm test` — unitaires purs (`config/env.test.js`, `domain/matching/ttc.test.js`)
 4. Une base Postgres jetable + `TEST_DATABASE_URL`, puis `npm run test:db` — `listPublic.explain.dbtest.js` (zéro Seq Scan à 100k lignes) et `integration.dbtest.js` (don + échange bout en bout)
 5. Revue humaine de tous les points listés dans ce fichier (compléments de schéma, choix d'implémentation, gaps A18/dispute-window/RGPD) — chacun est une décision de Phase III prise sans aller-retour avec l'auteur du contrat, à confirmer ou amender.
+
+**Fait le 2026-09-06** : les 4 premiers points sont faits (21/21 tests passent, lint propre) — voir l'entrée "Vérification réelle" ci-dessus pour le détail des bugs trouvés en cours de route. Le point 5 (revue humaine) reste ouvert.
 
 ## 2026-09-06 [Setup initial]
 

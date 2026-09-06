@@ -17,7 +17,6 @@ async function main() {
   const pool = await createPool('web');
 
   if (await hasPendingMigrations(pool)) {
-    // eslint-disable-next-line no-console
     console.error('[FATAL] pending migrations found — run `npm run migrate` before starting web');
     await closePool(pool);
     process.exit(1);
@@ -95,7 +94,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  // eslint-disable-next-line no-console
   console.error('[FATAL] web process failed to start', err);
   process.exit(1);
 });

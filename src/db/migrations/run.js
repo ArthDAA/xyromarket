@@ -1,5 +1,5 @@
 import { readdir, readFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import pino from 'pino';
 import { Config } from '../../config/env.js';
@@ -88,7 +88,7 @@ export async function hasPendingMigrations(pool) {
 }
 
 // CLI entry point (`npm run migrate`).
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const pool = await createPool('migrate');
   try {
     await runMigrations(pool);

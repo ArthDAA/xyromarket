@@ -11,7 +11,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "test": "node --test src/**/*.test.js",
-    "test:db": "node --test src/**/*.dbtest.js",
+    "test:db": "node --test --test-concurrency=1 src/**/*.dbtest.js",
     "migrate": "node src/db/migrations/run.js",
     "web": "node src/web/main.js",
     "bot": "node src/bot/main.js",

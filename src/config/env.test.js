@@ -38,8 +38,20 @@ test('boot fails (ENV_SECRET_REUSE) when SESSION_SECRET === TOKEN_ENC_KEY', () =
   );
 });
 
+function assertThrowsConfigError(fn) {
+  // node:assert's assert.throws does not return the thrown error, so capture it directly.
+  try {
+    fn();
+  } catch (err) {
+    assert.ok(err instanceof ConfigError);
+    return err;
+  }
+  assert.fail('expected fn to throw a ConfigError');
+  return undefined;
+}
+
 test('ENV_MISSING lists every missing key at once, not just the first', () => {
-  const err = assert.throws(() => parseConfig({}), ConfigError);
+  const err = assertThrowsConfigError(() => parseConfig({}));
   assert.equal(err.code, 'ENV_MISSING');
   for (const key of [
     'DATABASE_URL',
@@ -57,7 +69,7 @@ test('ENV_MISSING lists every missing key at once, not just the first', () => {
 
 test('ENV_INVALID rejects a non-https PUBLIC_BASE_URL without leaking secret values', () => {
   const env = { ...validEnv, PUBLIC_BASE_URL: 'http://xyro.market' };
-  const err = assert.throws(() => parseConfig(env), ConfigError);
+  const err = assertThrowsConfigError(() => parseConfig(env));
   assert.equal(err.code, 'ENV_INVALID');
   assert.ok(err.message.includes('PUBLIC_BASE_URL'));
   assert.ok(!err.message.includes(validEnv.SESSION_SECRET));
@@ -66,6 +78,6 @@ test('ENV_INVALID rejects a non-https PUBLIC_BASE_URL without leaking secret val
 
 test('ENV_INVALID rejects a TOKEN_ENC_KEY that is not exactly 32 bytes', () => {
   const env = { ...validEnv, TOKEN_ENC_KEY: Buffer.alloc(16, 1).toString('base64') };
-  const err = assert.throws(() => parseConfig(env), ConfigError);
+  const err = assertThrowsConfigError(() => parseConfig(env));
   assert.equal(err.code, 'ENV_INVALID');
 });
