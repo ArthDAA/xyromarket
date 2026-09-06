@@ -76,6 +76,7 @@ CREATE TABLE guilds (
   bot_present BOOLEAN NOT NULL DEFAULT false,
   bot_role_position INTEGER,
   audit_blind BOOLEAN NOT NULL DEFAULT false,
+  role_hierarchy_ok BOOLEAN NOT NULL DEFAULT true,
   last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

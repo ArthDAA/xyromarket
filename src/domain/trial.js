@@ -3,6 +3,7 @@ import { matchRepo } from '../db/repositories/matchRepo.js';
 import { listingsRepo } from '../db/repositories/listingsRepo.js';
 import { usersRepo } from '../db/repositories/usersRepo.js';
 import { settingsRepo } from '../db/repositories/settingsRepo.js';
+import { pendingNotificationsRepo } from '../db/repositories/pendingNotificationsRepo.js';
 import { publish, CHANNELS } from '../bus/events.js';
 import * as audit from './audit.js';
 
@@ -229,6 +230,16 @@ export async function expire(tx, transactionId) {
     reason: 'TRIAL_EXPIRED',
   });
   await restoreListingForTransaction(tx, transaction);
+
+  // No off-platform delivery channel decided yet (Q1) — persist intent only.
+  // TODO: canal de notification externe non tranché (Q1)
+  for (const userId of [transaction.fromUserId, transaction.toUserId]) {
+    await pendingNotificationsRepo.insert(tx, {
+      userId,
+      eventType: 'trial.expire',
+      payload: { transactionId },
+    });
+  }
   return updated;
 }
 

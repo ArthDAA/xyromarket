@@ -4,6 +4,7 @@ import { usersRepo } from '../db/repositories/usersRepo.js';
 import { listingsRepo } from '../db/repositories/listingsRepo.js';
 import { listingQueueRepo } from '../db/repositories/listingQueueRepo.js';
 import { matchRepo } from '../db/repositories/matchRepo.js';
+import { pendingNotificationsRepo } from '../db/repositories/pendingNotificationsRepo.js';
 import * as rbac from './rbac.js';
 import * as audit from './audit.js';
 import * as engine from './matching/engine.js';
@@ -136,6 +137,14 @@ export async function sanction(tx, actorId, userId, { kind, reason, endsAt = nul
     after: created,
   });
   await publish(tx, CHANNELS.EVENT_MODERATION_ACTION, { userId, kind, sanctionId: created.id });
+
+  // No off-platform delivery channel decided yet (Q1) — persist intent only.
+  // TODO: canal de notification externe non tranché (Q1)
+  await pendingNotificationsRepo.insert(tx, {
+    userId,
+    eventType: 'moderation.sanction',
+    payload: { sanctionId: created.id, kind, reason },
+  });
   rbac.invalidateCache(userId);
   return created;
 }

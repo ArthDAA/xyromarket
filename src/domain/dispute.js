@@ -1,6 +1,7 @@
 import { disputesRepo } from '../db/repositories/disputesRepo.js';
 import { transactionsRepo } from '../db/repositories/transactionsRepo.js';
 import { settingsRepo } from '../db/repositories/settingsRepo.js';
+import { pendingNotificationsRepo } from '../db/repositories/pendingNotificationsRepo.js';
 import * as trial from './trial.js';
 import * as rbac from './rbac.js';
 import * as audit from './audit.js';
@@ -46,6 +47,16 @@ export async function open(tx, actorId, transactionId, { reason, body = '' }) {
   // -> DISPUTED, publishes event.transaction.updated: hub.js reacts by posting into (and
   // thereby un-archiving) the existing thread — no dedicated "reopen" bus channel needed.
   await trial.openDispute(tx, transactionId);
+
+  // No off-platform delivery channel decided yet (Q1) — persist intent only.
+  // TODO: canal de notification externe non tranché (Q1)
+  const otherParty = transaction.fromUserId === actorId ? transaction.toUserId : transaction.fromUserId;
+  await pendingNotificationsRepo.insert(tx, {
+    userId: otherParty,
+    eventType: 'dispute.open',
+    payload: { disputeId: dispute.id, transactionId },
+  });
+
   await audit.record(tx, {
     actorId,
     action: 'dispute.opened',

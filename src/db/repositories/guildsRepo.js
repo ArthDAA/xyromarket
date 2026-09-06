@@ -24,7 +24,11 @@ export const guildsRepo = {
     return guildsRepo.findById(tx, id);
   },
 
-  async updatePresence(tx, id, { name, iconHash, memberCountCached, botPresent, botRolePosition, auditBlind }) {
+  async updatePresence(
+    tx,
+    id,
+    { name, iconHash, memberCountCached, botPresent, botRolePosition, auditBlind, roleHierarchyOk },
+  ) {
     const { rows } = await tx.query(
       `UPDATE guilds SET
          name = COALESCE($2, name),
@@ -32,10 +36,11 @@ export const guildsRepo = {
          member_count_cached = COALESCE($4, member_count_cached),
          bot_present = COALESCE($5, bot_present),
          bot_role_position = COALESCE($6, bot_role_position),
-         audit_blind = COALESCE($7, audit_blind)
+         audit_blind = COALESCE($7, audit_blind),
+         role_hierarchy_ok = COALESCE($8, role_hierarchy_ok)
        WHERE id = $1
        RETURNING *`,
-      [id, name, iconHash, memberCountCached, botPresent, botRolePosition, auditBlind],
+      [id, name, iconHash, memberCountCached, botPresent, botRolePosition, auditBlind, roleHierarchyOk],
     );
     return mapRow(rows[0]) ?? null;
   },

@@ -85,6 +85,21 @@ Le contrat demande des "vues matérialisées `mv_stats_*`" rafraîchies via `REF
 - **`§2bis Annonces` mentionne "marquer vérifiée"** pour les annonces, mais ni `domain/listings.js` ni le schéma de migration ne définissent de statut "vérifiée" au niveau annonce (le concept "Vérifié" du contrat, M9, s'applique aux **utilisateurs**, via `reputation.evaluateVerified`). Probable résidu de rédaction. Non implémenté (aucune garantie ni schéma ne le sous-tend) ; à clarifier avec le client plutôt qu'à inventer une colonne.
 - **Statique/CSS/JS front-end : aucun pipeline choisi.** `web/main.js` sert `/healthz` et les pages HTML côté serveur ; aucune décision de build front-end (bundler, CSS) n'a été prise, car hors du périmètre de la clarification "style de code" initiale. À trancher séparément si une UI plus riche est voulue.
 
+## 2026-09-06 [Q1 - intentions de notification persistées]
+
+Conformément au gabarit du prompt Phase III, `trial.expire`, `dispute.open` et `moderation.sanction` persistent désormais l'intention de notification dans `pending_notifications` (aucune tentative de livraison), avec le commentaire standard `// TODO: canal de notification externe non tranché (Q1)`. Ajout du repo `pendingNotificationsRepo`. Aucun autre sous-ensemble du projet n'est bloqué par Q1.
+
+## 2026-09-06 [M15 - bannière de hiérarchie de rôle]
+
+`guilds.role_hierarchy_ok` ajoutée (booléen, défaut `true`) : porte le second repli explicite de M15/`guildWatcher.js` ("MP au propriétaire si possible, sinon bannière sur le site") — colonne lue par le web pour afficher un avertissement, indépendante de Q1 (M15 spécifie déjà son propre repli, ce n'est pas un cas laissé ouvert).
+
+## 2026-09-06 [bot/ - choix d'implémentation]
+
+- **`bot/main.js` héberge aussi l'abonnement à `event.ownership.changed`** (en plus des `intent.*` qu'il possède explicitement dans le contrat). `transfer.js` est un handler de ce canal mais aucun bloc ne précise quel processus l'héberge — `bot` a déjà la seule connexion bus longue durée de l'architecture, donc c'est l'endroit le plus naturel plutôt que d'ouvrir une connexion dédiée depuis `web`/`jobs`.
+- **Archivage de fil hub via `setTimeout` en mémoire** (`bot/hub.js`) : pas de job dédié dans `jobs/main.js` pour cela. Un redémarrage du bot dans la fenêtre de 7 jours saute simplement l'archivage automatique (aucune conséquence sur l'audit ou l'historique, le fil reste lisible) — accepté comme dégradation mineure plutôt que d'ajouter un 6e sous-job pour une pure question de rangement Discord.
+- **Salon de négociation du hub identifié par nom** (`negociations`, repli sur `systemChannel`) : le contrat ne précise pas comment `hub.js` retrouve "le salon de négociation du hub" — aucun identifiant de salon n'est configurable nulle part dans `settings`. Convention de nommage choisie, à documenter dans le dossier de vérification Discord (F5) et modifiable si le client préfère un salon existant.
+- **Verrou `BOT_SINGLETON` tenu sur une connexion dédiée pour toute la durée du process** (pas via `withAdvisoryLock`, conçu pour une section critique courte avec libération automatique) — cohérent avec "un seul process bot tourne à la fois", relâché explicitement au `SIGTERM`.
+
 ## 2026-09-06 [Setup initial]
 
 - Repo non existant au démarrage de Phase III (pas de `.git`, pas de `package.json`). Scaffold créé : `package.json` (ESM, `"type": "module"`), ESLint + Prettier, `.gitignore`, `git init`.
