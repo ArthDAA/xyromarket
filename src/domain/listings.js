@@ -59,6 +59,11 @@ export async function create(tx, userId, { guildId, mode, description, tags, see
   await ownership.assertOwnershipForListing(tx, userId, guildId);
   await assertBotReadyForListing(tx, guildId);
 
+  const existingActive = await listingsRepo.findActiveByGuild(tx, guildId);
+  if (existingActive) {
+    throw new ListingError('ERR_GUILD_HAS_ACTIVE_LISTING', `Guild ${guildId} already has an active listing`);
+  }
+
   if (description.length < DESCRIPTION_MIN || description.length > DESCRIPTION_MAX) {
     throw new ListingError(
       'ERR_INVALID_DESCRIPTION',

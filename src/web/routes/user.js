@@ -37,6 +37,15 @@ const reportSchema = z.object({
 });
 const disputeOpenSchema = z.object({ reason: z.string().min(1), body: z.string().max(2000).optional() });
 
+/** Human-readable French text for domain errors a form submitter can actually act on. */
+const FORM_ERROR_MESSAGES = {
+  ERR_GUILD_HAS_ACTIVE_LISTING: 'Ce serveur a déjà une annonce active. Retire-la ou attends sa clôture avant d\'en publier une nouvelle.',
+  ERR_BOT_ABSENT: 'Le bot Xyro Market n\'est pas encore présent sur ce serveur — invite-le avant de publier une annonce.',
+  ERR_ROLE_HIERARCHY: 'Le rôle du bot Xyro Market doit être positionné au-dessus du rôle d\'essai sur ce serveur.',
+  ERR_NOT_OWNER: 'Tu dois être propriétaire de ce serveur Discord pour effectuer cette action.',
+  ERR_SEEKING_TAGS_ON_DON: 'Une annonce en mode "don" ne peut pas avoir de tags recherchés.',
+};
+
 function withAccept(handler) {
   return async (req, reply) => {
     try {
@@ -54,7 +63,8 @@ function withAccept(handler) {
         req.log.error({ err, correlationId }, 'unexpected error');
       }
       if (isFormSubmission(req)) {
-        return renderFormError(reply, `${err.code ?? 'ERR_UNEXPECTED'} — ${err.message ?? ''}`, mapped.status);
+        const message = FORM_ERROR_MESSAGES[err.code] ?? `${err.code ?? 'ERR_UNEXPECTED'} — ${err.message ?? ''}`;
+        return renderFormError(reply, message, mapped.status);
       }
       return reply.code(mapped.status).send(mapped.body);
     }
