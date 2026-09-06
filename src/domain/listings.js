@@ -2,6 +2,7 @@ import { listingsRepo } from '../db/repositories/listingsRepo.js';
 import { guildsRepo } from '../db/repositories/guildsRepo.js';
 import * as ownership from './ownership.js';
 import * as audit from './audit.js';
+import { publish, CHANNELS } from '../bus/events.js';
 
 export class ListingError extends Error {
   constructor(code, message) {
@@ -90,6 +91,8 @@ export async function create(tx, userId, { guildId, mode, description, tags, see
     targetId: listing.id,
     after: listing,
   });
+  // Nudges jobs.matchRound to run early (debounced 30s) rather than waiting for its 5min tick.
+  await publish(tx, CHANNELS.EVENT_LISTING_CHANGED, { listingId: listing.id });
 
   return listing;
 }

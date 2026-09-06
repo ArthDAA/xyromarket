@@ -38,12 +38,41 @@ export const transactionsRepo = {
     return mapRow(rows[0]) ?? null;
   },
 
+  /** TRANSFERRED transactions whose dispute window has elapsed with no open dispute — `jobs.trialExpiry`'s auto-close sweep. */
+  async findTransferredWithoutOpenDispute(tx, cutoffDate) {
+    const { rows } = await tx.query(
+      `SELECT t.* FROM transactions t
+       WHERE t.status = 'TRANSFERRED' AND t.transferred_at < $1
+         AND NOT EXISTS (SELECT 1 FROM disputes d WHERE d.transaction_id = t.id AND d.status <> 'resolved')`,
+      [cutoffDate],
+    );
+    return rows.map(mapRow);
+  },
+
   async findExpiredTrials(tx, now) {
     const { rows } = await tx.query(
       "SELECT * FROM transactions WHERE status = 'TRIAL' AND trial_ends_at < $1",
       [now],
     );
     return rows.map(mapRow);
+  },
+
+  /** All transactions currently `TRIAL` — `jobs.ownershipSweep`'s tighter-cadence scope. */
+  async findAllInTrial(tx) {
+    const { rows } = await tx.query("SELECT * FROM transactions WHERE status = 'TRIAL'");
+    return rows.map(mapRow);
+  },
+
+  /** Distinct user ids with at least one completed transaction — `jobs.statsRefresh`'s Vérifié re-evaluation scope. */
+  async listUserIdsWithCompletedTransaction(tx) {
+    const { rows } = await tx.query(
+      `SELECT DISTINCT user_id FROM (
+         SELECT from_user_id AS user_id FROM transactions WHERE status IN ('TRANSFERRED', 'CLOSED')
+         UNION
+         SELECT to_user_id AS user_id FROM transactions WHERE status IN ('TRANSFERRED', 'CLOSED')
+       ) ids`,
+    );
+    return rows.map((r) => r.user_id);
   },
 
   /** Completed (TRANSFERRED or CLOSED) transactions involving `userId`, either side. */

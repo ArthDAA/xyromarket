@@ -100,6 +100,13 @@ Conformément au gabarit du prompt Phase III, `trial.expire`, `dispute.open` et 
 - **Salon de négociation du hub identifié par nom** (`negociations`, repli sur `systemChannel`) : le contrat ne précise pas comment `hub.js` retrouve "le salon de négociation du hub" — aucun identifiant de salon n'est configurable nulle part dans `settings`. Convention de nommage choisie, à documenter dans le dossier de vérification Discord (F5) et modifiable si le client préfère un salon existant.
 - **Verrou `BOT_SINGLETON` tenu sur une connexion dédiée pour toute la durée du process** (pas via `withAdvisoryLock`, conçu pour une section critique courte avec libération automatique) — cohérent avec "un seul process bot tourne à la fois", relâché explicitement au `SIGTERM`.
 
+## 2026-09-06 [jobs/main.js - choix d'implémentation]
+
+- **`event.listing.changed` ajouté au jeu de canaux du bus.** Absent de l'énumération fermée `bus/events.js`, mais explicitement nommé par le texte du bloc `db/migrations`... non — par le Process de `domain/listings.js` ("publier event.match.proposed… non : publier intent de re-run matching (event.listing.changed)") ET par `jobs/main.js` ("également déclenché par event.listing.changed avec debounce 30s"). Deux blocs s'accordent sur son existence, seule l'énumération centrale l'omettait — compléter l'énumération plutôt qu'abandonner la fonctionnalité de debounce décrite deux fois.
+- **`jobs.trialExpiry` étendu** pour couvrir aussi la clôture après fenêtre de litige et l'exécution des suppressions RGPD après fenêtre de rétractation (cf. notes précédentes transfer.js/dispute.js et gdpr.js) — un seul sous-job supplémentaire de "sweep temporel", pas trois.
+- **`ownershipSweep` implémenté en deux ticks distincts** (`ownershipSweep` à 10 min couvrant à la fois le cas horaire "annonce active" et le cas 10 min "essai en cours", plus `ownershipSweepAuditBlind` à 5 min ne couvrant que les guildes `audit_blind`) plutôt qu'une seule fonction à cadence variable par guilde — plus simple à faire tourner sous `setInterval`, résultat identique (guildes horaires jamais resweepées plus souvent que nécessaire, guildes en essai couvertes à 10 min, guildes `audit_blind` en essai couvertes en plus à 5 min).
+- **Appels REST Discord dans `jobs` via `discord.js` `REST` seul** (`GET /guilds/{id}`, `GET /guilds/{id}/members/{user}`), sans instancier de `Client` Gateway — cohérent avec "tout appel Discord direct hors sweep REST" étant hors périmètre de `jobs`.
+
 ## 2026-09-06 [Setup initial]
 
 - Repo non existant au démarrage de Phase III (pas de `.git`, pas de `package.json`). Scaffold créé : `package.json` (ESM, `"type": "module"`), ESLint + Prettier, `.gitignore`, `git init`.
