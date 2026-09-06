@@ -140,18 +140,36 @@ export async function withTransaction(pool, fn, opts = {}) {
 }
 
 /**
+ * Blocking, transaction-scoped advisory lock: acquires on `tx`'s own
+ * connection and releases automatically at COMMIT/ROLLBACK. Use this (not
+ * `withAdvisoryLock`) for a short critical section inside code that already
+ * received a `tx` from a caller — e.g. `matching/queue.js` serializing
+ * writes to one listing's queue.
+ */
+export async function advisoryXactLock(tx, key) {
+  await tx.query('SELECT pg_advisory_xact_lock($1)', [key]);
+}
+
+/**
  * Runs `fn` while holding a Postgres advisory lock keyed by `key` (BigInt).
  * Non-blocking: if the lock is already held elsewhere, returns `null`
  * immediately without running `fn` — callers such as `jobs/main.js` rely on
  * this so ticks never stack up behind a slow previous run.
  *
+ * Pass `{ transactional: true }` when `fn`'s writes must be all-or-nothing —
+ * this wraps `fn` in `BEGIN`/`COMMIT`/`ROLLBACK` on the *same* locked
+ * connection (nesting `withTransaction` here would acquire a second,
+ * different client and hold the lock over an otherwise-unrelated
+ * transaction, which is not what callers like `engine.runRound` need).
+ *
  * @template T
  * @param {pg.Pool} pool
  * @param {bigint} key
  * @param {(tx: pg.PoolClient) => Promise<T>} fn
+ * @param {{ transactional?: boolean }} [opts]
  * @returns {Promise<T | null>}
  */
-export async function withAdvisoryLock(pool, key, fn) {
+export async function withAdvisoryLock(pool, key, fn, { transactional = false } = {}) {
   const logger = pool.__xyroLogger ?? pino({ level: Config.logLevel });
   const client = await pool.connect();
   instrumentQuery(client, logger);
@@ -161,7 +179,18 @@ export async function withAdvisoryLock(pool, key, fn) {
       return null;
     }
     try {
-      return await fn(client);
+      if (!transactional) {
+        return await fn(client);
+      }
+      try {
+        await client.query('BEGIN');
+        const result = await fn(client);
+        await client.query('COMMIT');
+        return result;
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+      }
     } finally {
       await client.query('SELECT pg_advisory_unlock($1)', [key]);
     }

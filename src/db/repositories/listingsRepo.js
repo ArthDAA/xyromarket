@@ -43,6 +43,15 @@ export const listingsRepo = {
     return rows.map(mapRow);
   },
 
+  /** Atomically claims a listing for a match, only if it's still `active`. `null` if it moved under us. */
+  async claimForMatch(tx, id) {
+    const { rows } = await tx.query(
+      "UPDATE listings SET status = 'matched', updated_at = now() WHERE id = $1 AND status = 'active' RETURNING *",
+      [id],
+    );
+    return mapRow(rows[0]) ?? null;
+  },
+
   async updateFields(tx, id, patch) {
     const { rows } = await tx.query(
       `UPDATE listings SET

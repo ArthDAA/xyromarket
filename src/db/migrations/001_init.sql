@@ -220,6 +220,22 @@ CREATE TABLE pending_notifications (
 );
 CREATE INDEX idx_pending_notifications_undelivered ON pending_notifications (user_id) WHERE delivered_at IS NULL;
 
+-- File d'attente FIFO du mode don (domain/matching/queue.js) — table non
+-- nommée dans le contrat migrations, nécessaire pour M4 ("file d'attente
+-- simple"). Les positions ne sont jamais renumérotées (garantie explicite).
+CREATE TABLE listing_queue (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  listing_id UUID NOT NULL REFERENCES listings (id) ON DELETE RESTRICT,
+  candidate_user_id UUID NOT NULL REFERENCES users (id) ON DELETE RESTRICT,
+  position INTEGER NOT NULL,
+  skipped_at TIMESTAMPTZ,
+  withdrawn_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (listing_id, candidate_user_id)
+);
+CREATE INDEX idx_listing_queue_head ON listing_queue (listing_id, position)
+  WHERE skipped_at IS NULL AND withdrawn_at IS NULL;
+
 -- Cooldown entre les mêmes parties après dissolution d'un cycle/proposition
 -- (A18) — table non nommée dans le contrat, nécessaire pour implémenter la
 -- garantie "un cycle dissous n'est pas reproposé à l'identique au tour
@@ -337,6 +353,7 @@ CREATE TRIGGER outbox_notify_trigger
 INSERT INTO settings (key, value) VALUES
   ('trial_duration_days', '7'),
   ('dispute_window_days', '14'),
+  ('match_proposal_ttl_hours', '24'),
   ('verified_rules', '{"minTransactions": 3, "minAverage": 4, "minAccountAgeDays": 30, "noActiveSanction": true}');
 
 INSERT INTO roles (key, label, revocable) VALUES

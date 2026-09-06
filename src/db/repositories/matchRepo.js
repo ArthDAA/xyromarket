@@ -81,6 +81,14 @@ export const matchRepo = {
     return rows.map(mapRow);
   },
 
+  /** All pairs currently in cooldown, for building an in-memory lookup set before a match round. */
+  async listActiveCooldownPairs(tx, now) {
+    const { rows } = await tx.query('SELECT user_id_a, user_id_b FROM match_cooldowns WHERE until > $1', [
+      now,
+    ]);
+    return rows.map((r) => [r.user_id_a, r.user_id_b]);
+  },
+
   /** True if the unordered pair (userIdA, userIdB) is currently in cooldown. */
   async isOnCooldown(tx, userIdA, userIdB, now) {
     const [a, b] = [userIdA, userIdB].sort();

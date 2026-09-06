@@ -41,6 +41,21 @@ La liste de tables du bloc `db/migrations` (§ Outputs) n'est pas exhaustive au 
 
 Le contrat demande "Hacher l'IP (SHA-256 + sel serveur)" mais ne nomme aucun secret dédié dans `config/env.js` pour ce sel (seuls `SESSION_SECRET` et `TOKEN_ENC_KEY` existent, chacun à racine unique pour son usage propre). Décision : dériver le sel de hachage IP de `SESSION_SECRET` via HMAC-SHA256 plutôt que d'ajouter une troisième variable d'environnement. Justification : la règle "une racine par usage" du contrat visait explicitement à isoler signature de session et chiffrement de jetons OAuth (compromission de l'une n'expose pas l'autre) ; le hachage d'IP à des fins d'audit n'a pas cette même exigence d'isolation (ce n'est pas un secret déchiffrable, juste un sel anti-rainbow-table), donc réutiliser `SESSION_SECRET` ne viole pas la garantie telle qu'énoncée. Fonction exportée `audit.hashIp(ip)` — les appelants (pipeline de requêtes web) hachent l'IP avant d'appeler `record`, qui ne stocke que le hash.
 
+## 2026-09-06 [M4 - table de file d'attente]
+
+`listing_queue` ajoutée à `001_init.sql` : `domain/matching/queue.js` a besoin d'une table persistante pour la FIFO du mode don (position, skip, withdraw), absente de la liste `db/migrations`. Colonnes dérivées directement des méthodes documentées dans le bloc `queue.js` (`enqueue`/`dequeueHead`/`skip`/`withdraw`).
+
+## 2026-09-06 [engine.js - durée de vie des propositions]
+
+Le contrat ne fixe aucune durée pour `match_proposals.expires_at` (contrairement à `trial_duration_days`/`dispute_window_days`, explicitement paramétrables). Ajout de `match_proposal_ttl_hours` (défaut 24) dans `settings`, suivant exactement le même patron que les deux autres délais déjà configurables — cohérent, pas une décision produit nouvelle.
+
+## 2026-09-06 [trial.js/engine.js - choix d'implémentation notables]
+
+- **Confirmation rôle essai en appel direct, pas par le bus.** `bus/events.js` énumère un jeu fermé de canaux, sans canal de "confirmation" retour bot->domaine. Le FSM `ACCEPTED -> (rôle attribué) -> TRIAL` a donc besoin d'un point d'entrée que `bot/trialRole.js` appelle **directement en process** après un succès/échec Discord (`trial.confirmTrialStarted` / `trial.reportRoleAssignFailed`), dans la même transaction que le handler du bus qui a exécuté l'intention. Le fil hub (`intent.hub.thread_create`) est traité comme best-effort et ne bloque pas l'entrée en `TRIAL` — seule l'attribution du rôle le fait, ce qui est la seule garantie de sécurité explicitement énoncée ("le chrono ne court pas sur un rôle non attribué").
+- **`trial.cancel`/`expire` ne libèrent que LEUR propre annonce**, pas tout le cycle n-aire dont la transaction est issue. Le contrat ne tranche pas explicitement ce cas (chaque transaction est individuellement pilotée par la FSM de `trial.js`, sans notion de "groupe" au niveau de ce bloc) — comportement local le plus simple et le moins surprenant, mais un réexamen produit pourrait vouloir annuler tout le cycle si un seul maillon échoue.
+- **`engine.runRound` n'est pas une transaction unique de bout en bout** : la garantie du contrat ("un tour est atomique : soit toutes les annonces d'un cycle passent en matched, soit aucune") est explicitement scopée *par cycle*, pas par tour entier — chaque cycle/appariement don est donc sa propre sous-transaction sur la connexion qui tient le verrou consultatif, avec re-vérification `status='active'` au moment de la persistance (`ERR_LISTING_VANISHED` abandonne seulement ce cycle, pas le tour).
+- **Sweep des propositions expirées déplacé dans `engine.runRound`** : aucun job dédié n'existe dans la liste des 5 sous-jobs de `jobs/main.js` pour l'expiration des `match_proposals` (contrairement à `trialExpiry` pour les transactions). Dissoudre les propositions expirées en tout début de tour est la lecture la plus naturelle et n'invente pas de mécanisme supplémentaire.
+
 ## 2026-09-06 [Setup initial]
 
 - Repo non existant au démarrage de Phase III (pas de `.git`, pas de `package.json`). Scaffold créé : `package.json` (ESM, `"type": "module"`), ESLint + Prettier, `.gitignore`, `git init`.
