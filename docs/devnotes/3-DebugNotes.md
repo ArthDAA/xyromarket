@@ -76,6 +76,15 @@ Le contrat demande des "vues matérialisées `mv_stats_*`" rafraîchies via `REF
 - `users.new` partage la même série mise en cache que `users.total` (filtrée par la plage demandée) plutôt qu'une série séparée — la distinction entre "total cumulé" et "nouveaux sur la période" est une question de filtrage de plage, pas de source de données différente.
 - `activity.recent` ne rentre pas dans la forme `points: {bucket,value}[]` (c'est un flux, pas une série) — le résultat porte un champ `items` supplémentaire à côté de `points: []`.
 
+## 2026-09-06 [web/ - choix d'implémentation]
+
+- **`oauth.buildAuthUrl`/`handleCallback` liés à un cookie nonce, pas à une session.** Le contrat décrit `state` comme "lié à la session, TTL 10 min", mais au moment de `/auth/discord` l'utilisateur n'a par définition **aucune session** (pas encore connecté). Implémenté avec un cookie signé `xm_oauth_state` de courte durée (même garantie CSRF : usage unique, expirant, vérifié en retour), plutôt qu'un lien littéral à une session inexistante.
+- **Routes `/auth/discord`, `/auth/discord/callback`, `/auth/logout` placées dans `routes/public.js`.** Aucun module "auth routes" séparé n'est listé dans `web/main.js` (seulement `public`/`user`/`admin`) ; ces routes sont accessibles sans authentification, donc `public.js` est le bon endroit.
+- **Pas de choix de moteur de vues.** `web/main.js` mentionne un "moteur de vues" à l'étape 7 sans en nommer un, et `1-CheckList.md` ne spécifie que la stack serveur. Implémenté avec du rendu HTML par template literals JS (`web/render.js`), sans dépendance supplémentaire — cohérent avec le choix JS pur + JSDoc déjà validé, pas une nouvelle décision d'outillage à valider séparément.
+- **Contenu des 15 pages légales/informatives non rédigé.** `web/render.js#legalPage` produit un gabarit structurel marqué explicitement comme placeholder — le texte juridique réel (mentions légales, CGU, etc.) doit venir de Le_Club/d'une relecture juridique, pas être inventé ici.
+- **`§2bis Annonces` mentionne "marquer vérifiée"** pour les annonces, mais ni `domain/listings.js` ni le schéma de migration ne définissent de statut "vérifiée" au niveau annonce (le concept "Vérifié" du contrat, M9, s'applique aux **utilisateurs**, via `reputation.evaluateVerified`). Probable résidu de rédaction. Non implémenté (aucune garantie ni schéma ne le sous-tend) ; à clarifier avec le client plutôt qu'à inventer une colonne.
+- **Statique/CSS/JS front-end : aucun pipeline choisi.** `web/main.js` sert `/healthz` et les pages HTML côté serveur ; aucune décision de build front-end (bundler, CSS) n'a été prise, car hors du périmètre de la clarification "style de code" initiale. À trancher séparément si une UI plus riche est voulue.
+
 ## 2026-09-06 [Setup initial]
 
 - Repo non existant au démarrage de Phase III (pas de `.git`, pas de `package.json`). Scaffold créé : `package.json` (ESM, `"type": "module"`), ESLint + Prettier, `.gitignore`, `git init`.

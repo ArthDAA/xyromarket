@@ -40,6 +40,12 @@ export const guildsRepo = {
     return mapRow(rows[0]) ?? null;
   },
 
+  /** Guilds this Discord user currently owns, per the stored reference value — used by `GET /me/serveurs`. */
+  async listOwnedByDiscordId(tx, ownerDiscordId) {
+    const { rows } = await tx.query('SELECT * FROM guilds WHERE owner_discord_id = $1', [ownerDiscordId]);
+    return rows.map(mapRow);
+  },
+
   async listWithActiveListing(tx) {
     const { rows } = await tx.query(
       `SELECT DISTINCT g.* FROM guilds g

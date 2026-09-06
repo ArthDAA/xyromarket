@@ -71,6 +71,22 @@ export async function runMigrations(pool, { logger = pino({ level: Config.logLev
   return result;
 }
 
+/**
+ * Read-only check used by `web/main.js`/`bot/main.js`/`jobs/main.js` at
+ * boot: the process must not start if any migration on disk hasn't been
+ * applied yet. Does not apply anything itself.
+ */
+export async function hasPendingMigrations(pool) {
+  const diskVersions = new Set(await listMigrationFiles());
+  const { rows } = await pool.query(
+    "SELECT to_regclass('public.schema_migrations') IS NOT NULL AS exists",
+  );
+  if (!rows[0].exists) return diskVersions.size > 0;
+  const { rows: applied } = await pool.query('SELECT version FROM schema_migrations');
+  const appliedSet = new Set(applied.map((r) => r.version));
+  return [...diskVersions].some((v) => !appliedSet.has(v));
+}
+
 // CLI entry point (`npm run migrate`).
 if (import.meta.url === `file://${process.argv[1]}`) {
   const pool = await createPool('migrate');
