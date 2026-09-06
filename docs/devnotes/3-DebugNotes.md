@@ -107,6 +107,19 @@ Conformément au gabarit du prompt Phase III, `trial.expire`, `dispute.open` et 
 - **`ownershipSweep` implémenté en deux ticks distincts** (`ownershipSweep` à 10 min couvrant à la fois le cas horaire "annonce active" et le cas 10 min "essai en cours", plus `ownershipSweepAuditBlind` à 5 min ne couvrant que les guildes `audit_blind`) plutôt qu'une seule fonction à cadence variable par guilde — plus simple à faire tourner sous `setInterval`, résultat identique (guildes horaires jamais resweepées plus souvent que nécessaire, guildes en essai couvertes à 10 min, guildes `audit_blind` en essai couvertes en plus à 5 min).
 - **Appels REST Discord dans `jobs` via `discord.js` `REST` seul** (`GET /guilds/{id}`, `GET /guilds/{id}/members/{user}`), sans instancier de `Client` Gateway — cohérent avec "tout appel Discord direct hors sweep REST" étant hors périmètre de `jobs`.
 
+## 2026-09-06 [Intégration bout en bout - point 10 de l'ordre d'implémentation]
+
+`src/integration.dbtest.js` : don (file d'attente) et échange (cycle TTC à 2) de bout en bout jusqu'à `TRANSFERRED`, conformément au point 10 du contrat. Le bus `LISTEN`/`NOTIFY` n'est pas exercé (aucun process bot ne tourne dans ce test) — les confirmations que `bot/trialRole.js` ferait normalement (`trial.confirmTrialStarted`) et l'observation de bascule que `jobs.ownershipSweep`/`bot/guildWatcher.js` ferait normalement (`transfer.onOwnershipChanged`) sont appelées directement, en process, ce qui est exactement le point d'intégration réel entre le bot et le domaine tel que conçu dans ce Phase III (cf. notes trial.js/bot plus haut : ces confirmations sont des appels directs, pas des événements de bus). Ce qui est vérifié ici est le comportement domaine/repositories de bout en bout — la plomberie du bus elle-même n'a pas de logique propre à tester à ce niveau.
+
+## 2026-09-06 [Bilan de vérification - à faire dès Node.js disponible]
+
+L'intégralité du code de ce Phase III (32 blocs BIOPGE) a été écrite sans pouvoir exécuter `npm install` ni aucun test — Node.js était absent de la machine tout au long de l'implémentation. **Avant de considérer un seul bloc comme validé au sens du contrat**, il reste à faire, dans l'ordre :
+1. `npm install`
+2. `npm run lint` — corriger toute erreur ESLint (imports inutilisés notamment, plusieurs ont déjà été retirés manuellement mais un passage automatisé reste nécessaire)
+3. `npm test` — unitaires purs (`config/env.test.js`, `domain/matching/ttc.test.js`)
+4. Une base Postgres jetable + `TEST_DATABASE_URL`, puis `npm run test:db` — `listPublic.explain.dbtest.js` (zéro Seq Scan à 100k lignes) et `integration.dbtest.js` (don + échange bout en bout)
+5. Revue humaine de tous les points listés dans ce fichier (compléments de schéma, choix d'implémentation, gaps A18/dispute-window/RGPD) — chacun est une décision de Phase III prise sans aller-retour avec l'auteur du contrat, à confirmer ou amender.
+
 ## 2026-09-06 [Setup initial]
 
 - Repo non existant au démarrage de Phase III (pas de `.git`, pas de `package.json`). Scaffold créé : `package.json` (ESM, `"type": "module"`), ESLint + Prettier, `.gitignore`, `git init`.
