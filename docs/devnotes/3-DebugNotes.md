@@ -159,3 +159,23 @@ L'intégralité du code de ce Phase III (32 blocs BIOPGE) a été écrite sans p
 
 - Repo non existant au démarrage de Phase III (pas de `.git`, pas de `package.json`). Scaffold créé : `package.json` (ESM, `"type": "module"`), ESLint + Prettier, `.gitignore`, `git init`.
 - Fichiers `1-CheckList.md`, `2-Architecture.md`, `prompt-claude-code-phase3.md` déplacés vers `docs/devnotes/` pour correspondre aux chemins référencés dans le contrat (`docs/devnotes/1-CheckList.md`, `docs/devnotes/2-Architecture.md`).
+
+## 2026-09-08 [A24 - retour sur A18 : plus de blocage RESTRICT sur la suppression d'annonce]
+
+Remonté par le client en revoyant le correctif précédent (le bouton "Supprimer" transformé en simple note pour l'annonce "Cacahuètes et Kkhuètes", elle-même bloquée par une ligne `match_participants` historique) : "Inutile de la garder dans l'historique. Or, il peut être bon de garder les créations et les suppressions - pour que des futurs admins pourront consulter." Autrement dit : la ligne `listings` elle-même n'a pas besoin de survivre pour ça — `audit_log.before`/`after` le fait déjà (`listing.created` capture le contenu intégral dès la création, `listing.removed`/`.removed_soft_fallback` la capture à nouveau juste avant suppression). C'est une révision d'A18 par la même personne qui avait tranché A18 en connaissance du compromis — pas un désaccord avec un tiers, donc pas d'escalade nécessaire.
+
+Migration `005_listings_delete_set_null.sql` : les trois FK vers `listings(id)` (`match_participants.listing_id` — rendue nullable, `.gives_to_listing_id`, `listing_queue.listing_id` — rendue nullable) passent de `ON DELETE RESTRICT` à `ON DELETE SET NULL`. Vérifié avant de toucher au schéma que rien ne lit ces colonnes en supposant qu'elles restent non-nulles après coup (`engine.js`, `trial.js`, `user.js` ne les lisent que pendant qu'une proposition est encore ouverte, jamais après qu'une annonce impliquée ait pu être supprimée — `assertMutable` interdit de toute façon de supprimer une annonce encore `matched`/`fulfilled`).
+
+`domain/listings.js:remove()` inchangé dans sa logique — `hardDelete` tente toujours le `DELETE` réel d'abord ; son `catch` sur `23503` devient un filet purement défensif (plus le chemin normal pour ces deux tables). `web/routes/user.js` : le bouton "Supprimer" redevient offert sur le statut `removed` sans commentaire particulier (retiré : la note ajoutée dans le commit précédent expliquant pourquoi il ne servait à rien — elle ne décrit plus la réalité).
+
+Nettoyage ponctuel de la base de dev une fois la migration appliquée : 4 lignes `removed` traînaient (2 legacy dont l'annonce citée par le client, 2 lignes de fixture `harddelete-fallback-guild-*` — pollution de `npm run test:db`, cf. entrée séparée ci-dessous) — supprimées physiquement à la main, plus rien ne les en empêchait.
+
+Test dbtest `removing a listing that a candidate ever queued on falls back to a soft delete` renommé et réécrit pour vérifier le nouveau comportement (suppression physique réelle, `listing_queue.listing_id` mis à `NULL` sur la ligne conservée) plutôt que l'ancien repli.
+
+Vérifié : test (6) + test:db (14) au vert, testé en direct dans Chrome (le bouton "Supprimer" sur l'annonce citée par le client fait bien disparaître la ligne cette fois).
+
+## 2026-09-08 [bug d'environnement trouvé en cours de route - `npm run test:db` écrivait dans la base de dev]
+
+En creusant le blocage `match_participants` ci-dessus, découverte que `integration.dbtest.js` fait `process.env.DATABASE_URL = process.env.TEST_DATABASE_URL ?? Config.databaseUrl` — et `TEST_DATABASE_URL` n'a jamais été défini dans `.env`. Résultat : chaque `npm run test:db` de cette session (et probablement des précédentes) tournait en fait contre `xyro-dev-pg` (port 55433, la base "réelle" utilisée en test manuel), pas contre `xyro-test-pg` (port 55432, censée être la base jetable dédiée) — d'où les lignes `harddelete-fallback-guild-*` retrouvées dans la base de dev alors qu'elles ne devraient exister que dans une base jetée après coup. `xyro-test-pg` tournait bien (`docker ps` la montrait "Up"), simplement rien ne s'y connectait jamais.
+
+Corrigé : `TEST_DATABASE_URL` ajouté à `.env` (port 55432, même identifiants que `DATABASE_URL`) ; migrations rejouées sur `xyro-test-pg` pour qu'elle ait le même schéma que la base de dev. `.env` n'étant pas versionné, rien à committer ici — seule cette entrée documente la cause et le correctif pour que ça ne resurgisse pas sans explication.

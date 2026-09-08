@@ -1,6 +1,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { Config } from '../../config/env.js';
+import { Config, loadDotEnvInto } from '../../config/env.js';
 import { closePool, createPool } from '../pool.js';
 import { runMigrations } from './run.js';
 import { buildListPublicWhere } from '../repositories/listingsRepo.js';
@@ -19,6 +19,8 @@ const ROW_COUNT = 100_000;
 let pool;
 
 before(async () => {
+  // See src/integration.dbtest.js's before() for why this must run before the next line.
+  loadDotEnvInto(process.env);
   process.env.DATABASE_URL = process.env.TEST_DATABASE_URL ?? Config.databaseUrl;
   pool = await createPool('migrate');
   await runMigrations(pool);

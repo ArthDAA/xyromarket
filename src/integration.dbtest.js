@@ -1,6 +1,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { Config } from './config/env.js';
+import { Config, loadDotEnvInto } from './config/env.js';
 import { closePool, createPool, withTransaction } from './db/pool.js';
 import { runMigrations } from './db/migrations/run.js';
 import { usersRepo } from './db/repositories/usersRepo.js';
@@ -57,6 +57,11 @@ async function makeOwnedGuild(user, namePrefix) {
 }
 
 before(async () => {
+  // `.env` is only merged into process.env lazily, on first `Config` property access (env.js's
+  // Proxy) — reading process.env.TEST_DATABASE_URL any earlier than that always saw it as unset
+  // (real OS env only), silently defeating the whole TEST_DATABASE_URL override and running every
+  // dbtest against Config.databaseUrl (the persistent dev DB) instead of a disposable one.
+  loadDotEnvInto(process.env);
   process.env.DATABASE_URL = process.env.TEST_DATABASE_URL ?? Config.databaseUrl;
   pool = await createPool('migrate');
   await runMigrations(pool);
