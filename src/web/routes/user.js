@@ -86,12 +86,12 @@ const TRANSACTION_STATUS_LABELS = {
 const CANCELLABLE_TRANSACTION_STATUSES = new Set(['PROPOSED', 'ACCEPTED', 'TRIAL']);
 const TERMINAL_TRANSACTION_STATUSES = new Set(['CANCELLED', 'EXPIRED', 'CLOSED']);
 
-// 'removed' included too (A18): remove() now hard-deletes when it can, so re-offering
-// the button on an already-removed listing lets the owner purge a legacy soft-deleted
-// row left over from before that change — retrying is harmless either way.
-const REMOVABLE_STATUSES = new Set(['active', 'pending_bot', 'hidden', 'removed']);
-// No point editing a listing that's already (soft-)removed — matches `assertMutable`
-// minus 'removed', unlike REMOVABLE_STATUSES which deliberately keeps it (A18 retry).
+// A listing only ever shows here already `removed` when its one hard-delete attempt
+// (inside `remove()` itself) hit a permanent FK reference (a past match_participants
+// row — append-only history, never cleaned up) and fell back to soft-delete. That
+// reference never goes away, so re-offering "Supprimer" here would be a dead-end
+// button: same outcome, forever. Not included — see the note rendered for it below.
+const REMOVABLE_STATUSES = new Set(['active', 'pending_bot', 'hidden']);
 const EDITABLE_STATUSES = new Set(['active', 'pending_bot', 'hidden']);
 
 function withAccept(handler) {
@@ -264,7 +264,9 @@ ${
                 ? ` — <form method="POST" action="/annonces/${l.id}/supprimer" style="display:inline">
 <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">
 <button type="submit">Supprimer</button></form>`
-                : ''
+                : l.status === 'removed'
+                  ? ' — déjà supprimée (invisible du public) ; conservée car liée à l\'historique d\'une mise en contact passée'
+                  : ''
             }</li>`,
         )
         .join('')}</ul>`
