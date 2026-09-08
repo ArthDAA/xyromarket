@@ -19,6 +19,7 @@ const CODE_TO_STATUS = {
   ERR_SELF_QUEUE: 400,
   ERR_SELF_SWAP: 400,
   ERR_MODE_MISMATCH: 400,
+  ERR_TAG_MISMATCH: 400,
 
   // 409 — conflict / bad transition / already-something
   ERR_CONFLICT: 409,

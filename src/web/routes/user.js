@@ -58,6 +58,7 @@ const FORM_ERROR_MESSAGES = {
   ERR_TOO_MANY_TAGS: 'Trop de tags — 10 maximum.',
   ERR_SELF_SWAP: 'Tu ne peux pas proposer un échange avec ta propre annonce.',
   ERR_MODE_MISMATCH: 'Les deux annonces doivent être en mode "échange".',
+  ERR_TAG_MISMATCH: 'Cet échange ne correspond pas : aucune des deux annonces n\'offre ce que l\'autre recherche.',
   ERR_COOLDOWN: 'Un refus récent entre vous deux empêche une nouvelle proposition pour l\'instant.',
   ERR_NOT_PARTICIPANT: 'Tu ne fais pas partie de cette proposition.',
   ERR_PROPOSAL_EXPIRED: 'Cette proposition a expiré ou n\'est plus ouverte.',
