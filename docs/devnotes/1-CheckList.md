@@ -117,7 +117,7 @@ Proposée après un point d'étape (2026-09-17) sur ce qu'il reste avant que le 
 
 | # | Item | Bloque quoi | Qui |
 |---|---|---|---|
-| E1 | Committer le travail en cours (A16→A32, ~29 fichiers) | Tout le reste — rien à déployer tant que ce n'est pas sur une branche/un remote | Dev (Arthus) |
+| E1 | ~~Committer le travail en cours~~ **fait, 2026-09-17** (commit `32fd155`, 31 fichiers, A16→A33) — reste à pousser sur un remote quand il y en aura un, non fait ici | Tout le reste — rien à déployer tant que ce n'est pas sur une branche/un remote | Dev (Arthus) |
 | E2 | Nom de domaine (F7, toujours "à définir/acquérir" au moment de Phase I) | E4 (TLS), E5 (redirect URI OAuth) — sans domaine, pas de `PUBLIC_BASE_URL` https valide, donc le process refuse de démarrer en prod | Client/Dev — tâche différée depuis Phase I, redevient bloquante ici |
 | E3 | Provisionner le VPS (1 Go, By-Hoster, KVM Proxmox — F1), OS minimal, swap configuré par sécurité même à 1 Go | E4-E9 | Dev, chez By-Hoster |
 | E4 | Reverse proxy (nginx ou Caddy) + certificat TLS (Let's Encrypt — Caddy peut l'automatiser) devant `web` | Le login Discord — sans TLS réel, les cookies `secure: true` (`session.js`, `oauth.js`) ne sont jamais envoyés par le navigateur, la connexion échoue silencieusement même si le process tourne | Dev |

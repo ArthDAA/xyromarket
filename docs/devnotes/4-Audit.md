@@ -57,7 +57,7 @@
 ## 4. Ce qui manque, par ordre de conséquence
 
 1. ~~A19 non signé par Le_Club.~~ **Résolu 2026-09-17** — validé par le client (cf. `1-CheckList.md` A19). Le renversement le plus important du projet (plus de matching n-aire automatique) n'était pas encore validé par celui qui avait explicitement verrouillé l'exigence contraire au moment de cet audit ; ce n'était pas un gap technique mais un gap de mandat, désormais levé.
-2. **29 fichiers non committés**, incluant la totalité d'A19-A32. Un incident (disque, `git checkout .` malheureux, VPS perdu) efface la moitié récente du projet. `git log` seul restaurerait une version du site vendant encore le matching n-aire que le client n'a jamais eu en prod.
+2. ~~29 fichiers non committés~~ **Résolu 2026-09-17** — commit `32fd155` (31 fichiers, A16→A33). Pas encore poussé sur un remote, mais le risque de perte locale immédiate (disque, `git checkout .` malheureux) est levé.
 3. ~~Aucune liste de transactions côté admin.~~ **Résolu 2026-09-17 (A33).**
 4. **Pages légales toujours placeholder.** Bloquant pour une mise en ligne réelle, indépendamment d'Étape 1.
 5. **Q1 (notification hors plateforme) toujours ouvert.** Mode d'échec documenté, pas théorique.
@@ -72,7 +72,7 @@ Lint propre, tests unitaires verts, échappement HTML systématique et vérifié
 
 Avant Étape 1 (mise en production) :
 
-1. Committer les 29 fichiers — non négociable, c'est la priorité absolue, avant tout le reste.
+1. ~~Committer les 29 fichiers~~ **fait** (`32fd155`).
 2. ~~Envoyer A19 à Le_Club pour validation explicite~~ **fait, validé 2026-09-17**.
 3. ~~Rejouer `npm run test:db` sur le schéma actuel~~ **fait, 19/19 au vert**.
 4. ~~Ajouter une route de liste pour `2bis Transactions`~~ **fait (A33)**.
