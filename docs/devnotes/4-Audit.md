@@ -78,4 +78,6 @@ Avant Étape 1 (mise en production) :
 4. ~~Ajouter une route de liste pour `2bis Transactions`~~ **fait (A33)**.
 5. Contenu réel des pages légales.
 
-Le reste (Q1, bootstrap admin) peut attendre un premier déploiement restreint, à condition que ce soit un choix conscient et non un oubli.
+Bootstrap admin : **tranché, 2026-09-17** (cf. `1-CheckList.md` E10) — Arthus devient le `proprietaire` originel via `INSERT` SQL manuel, puis attribue le rôle admin à Le_Club depuis le panel. Choix conscient, pas de mécanisme self-service construit.
+
+Le reste (Q1, contenu légal encore en attente du client) peut attendre un premier déploiement restreint, à condition que ce soit un choix conscient et non un oubli.
