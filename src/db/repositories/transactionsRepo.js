@@ -91,6 +91,32 @@ export const transactionsRepo = {
     return rows[0].count;
   },
 
+  /**
+   * Admin moderation read (`GET /admin/transactions`) — until now the only way to reach a
+   * transaction from the panel was already knowing its UUID (a report, a notification, the
+   * audit log). Optional `status`/`guildId` filters, no forced scope unlike `listByUser`.
+   */
+  async listForModeration(tx, { status, guildId } = {}, { limit = 20, cursor } = {}) {
+    const conditions = [];
+    const baseParams = [];
+    if (status) {
+      baseParams.push(status);
+      conditions.push(`status = $${baseParams.length}`);
+    }
+    if (guildId) {
+      baseParams.push(guildId);
+      conditions.push(`guild_id = $${baseParams.length}`);
+    }
+    const whereSql = conditions.length > 0 ? conditions.join(' AND ') : '1 = 1';
+    return paginateKeyset(tx, {
+      selectSql: `SELECT * FROM transactions WHERE ${whereSql}`,
+      countSql: `SELECT count(*)::int AS total FROM transactions WHERE ${whereSql}`,
+      baseParams,
+      limit,
+      cursor,
+    });
+  },
+
   async listByUser(tx, userId, { limit = 20, cursor } = {}) {
     return paginateKeyset(tx, {
       selectSql: 'SELECT * FROM transactions WHERE from_user_id = $1 OR to_user_id = $1',

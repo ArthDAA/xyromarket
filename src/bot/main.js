@@ -58,6 +58,7 @@ async function main() {
   bus.subscribe(CHANNELS.INTENT_HUB_THREAD_CREATE, (payload) => hub.onIntentHubThreadCreate(pool, client, payload));
   bus.subscribe(CHANNELS.INTENT_HUB_THREAD_ARCHIVE, (payload) => hub.onIntentHubThreadArchive(pool, client, payload));
   bus.subscribe(CHANNELS.INTENT_ANNOUNCE_HANDOVER, (payload) => announce.onIntentAnnounceHandover(pool, client, payload));
+  bus.subscribe(CHANNELS.INTENT_GUILD_LEAVE, (payload) => guildWatcher.onIntentGuildLeave(pool, client, payload));
   bus.subscribe(CHANNELS.EVENT_TRANSACTION_UPDATED, (payload) => hub.onEventTransactionUpdated(pool, client, payload));
   // transfer.js's handler is pure domain logic (DB + further intents, no Discord calls of its
   // own) — hosted here because bot already holds the one long-lived bus connection; see
@@ -67,6 +68,7 @@ async function main() {
   client.on(Events.ClientReady, async () => {
     logger.info('bot ready, reconciling guild cache');
     await guildWatcher.onReady(pool, client);
+    await hub.ensureHubInvite(pool, client, logger);
     await bus.start();
   });
   client.on(Events.GuildCreate, (guild) => guildWatcher.onGuildCreate(pool, guild).catch((err) => logger.error({ err }, 'onGuildCreate failed')));

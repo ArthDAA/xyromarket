@@ -9,6 +9,7 @@ export const CHANNELS = Object.freeze({
   INTENT_HUB_THREAD_CREATE: 'intent.hub.thread_create',
   INTENT_HUB_THREAD_ARCHIVE: 'intent.hub.thread_archive',
   INTENT_ANNOUNCE_HANDOVER: 'intent.announce.handover',
+  INTENT_GUILD_LEAVE: 'intent.guild.leave',
   EVENT_LISTING_CHANGED: 'event.listing.changed',
   EVENT_OWNERSHIP_CHANGED: 'event.ownership.changed',
   EVENT_MATCH_PROPOSED: 'event.match.proposed',

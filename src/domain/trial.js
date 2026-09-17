@@ -72,17 +72,10 @@ async function restoreListingForTransaction(tx, transaction) {
   }
 }
 
-/**
- * Creates one transaction per guild handover implied by a fully-accepted
- * proposal (one for `queue`, one per edge of a `cycle`), and immediately
- * moves each to ACCEPTED. `fromUserId` is always the guild's real, current
- * owner — `toUserId` the recipient who will receive the trial role.
- */
-export async function open(tx, proposalId) {
-  const found = await matchRepo.getProposal(tx, proposalId);
-  if (!found) throw new TrialError('NOT_FOUND', 'Proposal not found');
-  const { proposal, participants } = found;
-
+/** One handover edge per guild implied by a proposal: one for `queue`, one per edge of a `cycle`.
+ *  `fromUserId` is always the guild's real, current owner — `toUserId` the recipient who will
+ *  eventually receive the trial role. Pure computation, no writes. */
+async function computeEdges(tx, proposal, participants) {
   const edges = [];
   if (proposal.kind === 'queue') {
     const listing = await listingsRepo.findById(tx, participants[0].listingId);
@@ -101,6 +94,22 @@ export async function open(tx, proposalId) {
       edges.push({ fromUserId: participant.userId, toUserId: targetListing.userId, guildId: ownListing.guildId });
     }
   }
+  return edges;
+}
+
+/**
+ * Called by `engine.js` right when a proposal is created — **not** once it's
+ * accepted (A20). Creates one `PROPOSED` transaction per handover edge and
+ * opens its hub thread immediately, so the two sides can actually talk
+ * before either commits, instead of being connected only after the fact.
+ * Nothing here assigns the trial role yet — that still waits for full
+ * acceptance (`confirmAccepted`).
+ */
+export async function createTransactions(tx, proposalId) {
+  const found = await matchRepo.getProposal(tx, proposalId);
+  if (!found) throw new TrialError('NOT_FOUND', 'Proposal not found');
+  const { proposal, participants } = found;
+  const edges = await computeEdges(tx, proposal, participants);
 
   const created = [];
   for (const edge of edges) {
@@ -111,24 +120,39 @@ export async function open(tx, proposalId) {
       guildId: edge.guildId,
       status: 'PROPOSED',
     });
-    const accepted = await applyTransition(tx, transaction, 'ACCEPTED');
-
     const [fromDiscordId, toDiscordId] = await Promise.all([
       resolveDiscordId(tx, edge.fromUserId),
       resolveDiscordId(tx, edge.toUserId),
     ]);
     await publish(tx, CHANNELS.INTENT_HUB_THREAD_CREATE, {
-      transactionId: accepted.id,
+      transactionId: transaction.id,
       participantDiscordIds: [fromDiscordId, toDiscordId],
     });
-    await publish(tx, CHANNELS.INTENT_TRIAL_ASSIGN, {
-      guildId: edge.guildId,
-      memberDiscordId: toDiscordId,
-      transactionId: accepted.id,
-    });
-    created.push(accepted);
+    created.push(transaction);
   }
   return created;
+}
+
+/**
+ * Called once every participant has accepted (`engine.accept`'s `allAccepted`
+ * branch). The transactions and their hub threads already exist since
+ * proposal creation (`createTransactions`, A20) — this only promotes them to
+ * `ACCEPTED` and kicks off the trial role assignment.
+ */
+export async function confirmAccepted(tx, proposalId) {
+  const transactions = await transactionsRepo.findByProposalId(tx, proposalId);
+  const accepted = [];
+  for (const transaction of transactions) {
+    const updated = await applyTransition(tx, transaction, 'ACCEPTED');
+    const toDiscordId = await resolveDiscordId(tx, transaction.toUserId);
+    await publish(tx, CHANNELS.INTENT_TRIAL_ASSIGN, {
+      guildId: transaction.guildId,
+      memberDiscordId: toDiscordId,
+      transactionId: updated.id,
+    });
+    accepted.push(updated);
+  }
+  return accepted;
 }
 
 /**

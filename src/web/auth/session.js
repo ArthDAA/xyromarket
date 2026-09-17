@@ -104,7 +104,7 @@ export function tryAuth(pool) {
       if (!session) return null;
       const user = await usersRepo.findById(tx, session.userId);
       if (!user || user.deletedAt) return null;
-      return { user };
+      return { session, user };
     });
 
     if (result) {
@@ -114,6 +114,10 @@ export function tryAuth(pool) {
         username: result.user.username,
         isVerified: result.user.isVerified,
       };
+      // Lets a public-but-adaptive page (e.g. a listing's "je suis intéressé" form)
+      // issue a CSRF-protected POST for a logged-in visitor without forcing the
+      // redirect-to-login `requireAuth` would — the whole point of `tryAuth`.
+      req.csrfSecret = result.session.csrfSecret;
     }
   };
 }

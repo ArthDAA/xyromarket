@@ -13,6 +13,22 @@ export const usersRepo = {
     return mapRow(rows[0]) ?? null;
   },
 
+  /** Batch lookup for rendering a page of listings without an N+1 (public search/listing rows now show the owner's alias, A28). */
+  async findByIds(tx, ids) {
+    if (ids.length === 0) return [];
+    const { rows } = await tx.query('SELECT * FROM users WHERE id = ANY($1::uuid[])', [ids]);
+    return rows.map(mapRow);
+  },
+
+  /** Substring match on `username` — GIN trigram index (migration 006), used by admin search. */
+  async searchByUsername(tx, term, { limit = 20 } = {}) {
+    const { rows } = await tx.query(
+      "SELECT * FROM users WHERE deleted_at IS NULL AND username ILIKE '%' || $1 || '%' ORDER BY username LIMIT $2",
+      [term, limit],
+    );
+    return rows.map(mapRow);
+  },
+
   /** Upserts the user seen at OAuth login, keyed by their stable Discord id. */
   async upsertFromOAuth(tx, { discordId, username, avatarHash }) {
     try {

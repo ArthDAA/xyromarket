@@ -3,6 +3,7 @@ import { Config } from '../../config/env.js';
 import { usersRepo } from '../../db/repositories/usersRepo.js';
 import { guildsRepo } from '../../db/repositories/guildsRepo.js';
 import { oauthTokensRepo } from '../../db/repositories/oauthTokensRepo.js';
+import { transactionsRepo } from '../../db/repositories/transactionsRepo.js';
 import * as ownership from '../../domain/ownership.js';
 
 export class OAuthError extends Error {
@@ -33,6 +34,27 @@ export function buildAuthUrl() {
   url.searchParams.set('scope', SCOPES);
   url.searchParams.set('state', state);
   return { url: url.toString(), state };
+}
+
+// Manage Roles (M15) + View Audit Log (M6/A22) + Send Messages, Manage Threads,
+// Create Private Threads, Send Messages in Threads (hub — cf. README §Configuration Discord).
+const BOT_INVITE_PERMISSIONS = '361045690496';
+
+/**
+ * Discord invite URL for a specific guild, pre-selected and locked
+ * (`guild_id` + `disable_guild_select`) so the owner can't accidentally add
+ * the bot to the wrong server. Used to send an owner straight to the invite
+ * screen right after publishing an annonce whose guild doesn't have the bot
+ * yet (`listing.status === 'pending_bot'`).
+ */
+export function buildBotInviteUrl(guildId) {
+  const url = new URL('https://discord.com/api/oauth2/authorize');
+  url.searchParams.set('client_id', Config.discordClientId);
+  url.searchParams.set('scope', 'bot');
+  url.searchParams.set('permissions', BOT_INVITE_PERMISSIONS);
+  url.searchParams.set('guild_id', guildId);
+  url.searchParams.set('disable_guild_select', 'true');
+  return url.toString();
 }
 
 function consumeState(state, expectedState) {
@@ -181,14 +203,36 @@ export async function syncOwnedGuilds(tx, userId) {
 
   const guilds = await discordFetch('/users/@me/guilds', decryptToken(tokens.accessTokenEnc));
   const ownedGuilds = guilds.filter((g) => g.owner === true);
+  const ownedIds = new Set(ownedGuilds.map((g) => g.id));
+  const observedAt = new Date();
   for (const g of ownedGuilds) {
     await guildsRepo.ensureExists(tx, { id: g.id, name: g.name, ownerDiscordId: user.discordId });
     await ownership.observe(tx, {
       guildId: g.id,
       ownerDiscordId: user.discordId,
       source: 'oauth',
-      observedAt: new Date(),
+      observedAt,
     });
   }
+
+  // A guild we previously recorded as owned by this user but that Discord no longer
+  // attributes to them (deleted, left, or ownership transferred off-platform) — clear
+  // the stale reference so `GET /me/serveurs` / `/tableau-de-bord` stop listing it.
+  // Skipped for guilds with an open transaction: that guild's real owner-of-record
+  // is still in flux there (`domain/transfer.js:onOwnershipChanged`), and the
+  // authoritative signal for it comes from the bot (gateway/sweep), not this user's
+  // own guild list going stale.
+  const previouslyOwned = await guildsRepo.listOwnedByDiscordId(tx, user.discordId);
+  for (const g of previouslyOwned) {
+    if (ownedIds.has(g.id)) continue;
+    if (await transactionsRepo.findOpenByGuild(tx, g.id)) continue;
+    await ownership.observe(tx, {
+      guildId: g.id,
+      ownerDiscordId: ownership.UNOWNED,
+      source: 'oauth',
+      observedAt,
+    });
+  }
+
   return ownedGuilds;
 }

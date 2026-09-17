@@ -51,6 +51,22 @@ export const guildsRepo = {
     return rows.map(mapRow);
   },
 
+  /** Batch lookup for rendering a page of listings without an N+1 (public search/listing rows now show the guild name, A28). */
+  async findByIds(tx, ids) {
+    if (ids.length === 0) return [];
+    const { rows } = await tx.query('SELECT * FROM guilds WHERE id = ANY($1::text[])', [ids]);
+    return rows.map(mapRow);
+  },
+
+  /** Substring match on `name` — GIN trigram index (migration 006), used by admin search. */
+  async searchByName(tx, term, { limit = 20 } = {}) {
+    const { rows } = await tx.query(
+      "SELECT * FROM guilds WHERE name ILIKE '%' || $1 || '%' ORDER BY name LIMIT $2",
+      [term, limit],
+    );
+    return rows.map(mapRow);
+  },
+
   async listWithActiveListing(tx) {
     const { rows } = await tx.query(
       `SELECT DISTINCT g.* FROM guilds g

@@ -8,6 +8,7 @@ import { guildsRepo } from './db/repositories/guildsRepo.js';
 import { transactionsRepo } from './db/repositories/transactionsRepo.js';
 import { listingsRepo } from './db/repositories/listingsRepo.js';
 import { matchRepo } from './db/repositories/matchRepo.js';
+import { CHANNELS } from './bus/events.js';
 import * as listings from './domain/listings.js';
 import * as ownership from './domain/ownership.js';
 import * as queue from './domain/matching/queue.js';
@@ -135,7 +136,7 @@ test('don: queue match runs end-to-end to TRANSFERRED', async () => {
   assert.ok(transferred.transferredAt);
 });
 
-test('echange: a mutual 2-cycle runs end-to-end to TRANSFERRED on both edges', async () => {
+test('echange: a manually proposed direct swap (A19) runs end-to-end to TRANSFERRED on both edges', async () => {
   const userA = await makeUser('echange-a');
   const userB = await makeUser('echange-b');
   const guildA = await makeOwnedGuild(userA, 'echange-guild-a');
@@ -160,20 +161,19 @@ test('echange: a mutual 2-cycle runs end-to-end to TRANSFERRED on both edges', a
     }),
   );
 
-  const roundResult = await engine.runRound(pool);
-  assert.equal(roundResult.cyclesFound, 1);
-  assert.equal(roundResult.proposalsCreated, 1);
+  // B found A's listing themselves (e.g. via /annonces?mode=echange&tags=cuisine)
+  // and proposes a direct swap — no automatic discovery involved (A19).
+  const { proposal, allAccepted: acceptedOnPropose } = await withTransaction(pool, (tx) =>
+    engine.proposeDirectSwap(tx, userB.id, listingB.id, listingA.id),
+  );
+  assert.equal(acceptedOnPropose, false, 'proposing counts as the proposer\'s own acceptance, not both sides\'');
 
   const matchedA = await withTransaction(pool, (tx) => listingsRepo.findById(tx, listingA.id));
   const matchedB = await withTransaction(pool, (tx) => listingsRepo.findById(tx, listingB.id));
   assert.equal(matchedA.status, 'matched');
   assert.equal(matchedB.status, 'matched');
 
-  const [proposal] = await withTransaction(pool, (tx) => matchRepo.findOpenProposalsForUser(tx, userA.id));
-  assert.ok(proposal);
-
-  await withTransaction(pool, (tx) => engine.accept(tx, userA.id, proposal.id));
-  const finalAccept = await withTransaction(pool, (tx) => engine.accept(tx, userB.id, proposal.id));
+  const finalAccept = await withTransaction(pool, (tx) => engine.accept(tx, userA.id, proposal.id));
   assert.equal(finalAccept.allAccepted, true);
 
   const txA = await withTransaction(pool, (tx) => transactionsRepo.findOpenByGuild(tx, guildA));
@@ -214,79 +214,337 @@ test('echange: a mutual 2-cycle runs end-to-end to TRANSFERRED on both edges', a
   assert.equal(finalB.status, 'TRANSFERRED');
 });
 
-test('cancelling one edge of a 3-party cycle cascades to every sibling edge', async () => {
-  const userA = await makeUser('cycle3-a');
-  const userB = await makeUser('cycle3-b');
-  const userC = await makeUser('cycle3-c');
-  const guildA = await makeOwnedGuild(userA, 'cycle3-guild-a');
-  const guildB = await makeOwnedGuild(userB, 'cycle3-guild-b');
-  const guildC = await makeOwnedGuild(userC, 'cycle3-guild-c');
+test('cancelling one edge of a direct swap cascades to the sibling edge', async () => {
+  const userA = await makeUser('swap-cancel-a');
+  const userB = await makeUser('swap-cancel-b');
+  const guildA = await makeOwnedGuild(userA, 'swap-cancel-guild-a');
+  const guildB = await makeOwnedGuild(userB, 'swap-cancel-guild-b');
 
-  // A -> B -> C -> A: each listing has exactly one acceptable candidate, forming one
-  // deterministic 3-cycle (no other combination scores above zero).
-  await withTransaction(pool, (tx) =>
+  const listingA = await withTransaction(pool, (tx) =>
     listings.create(tx, userA.id, {
       guildId: guildA,
       mode: 'echange',
-      description: 'Communaute A du cycle a trois, vingt caracteres.',
+      description: 'Communaute A pour test d annulation en cascade, vingt.',
       tags: ['alpha'],
       seekingTags: ['beta'],
     }),
   );
-  await withTransaction(pool, (tx) =>
+  const listingB = await withTransaction(pool, (tx) =>
     listings.create(tx, userB.id, {
       guildId: guildB,
       mode: 'echange',
-      description: 'Communaute B du cycle a trois, vingt caracteres.',
+      description: 'Communaute B pour test d annulation en cascade, vingt.',
       tags: ['beta'],
-      seekingTags: ['gamma'],
-    }),
-  );
-  await withTransaction(pool, (tx) =>
-    listings.create(tx, userC.id, {
-      guildId: guildC,
-      mode: 'echange',
-      description: 'Communaute C du cycle a trois, vingt caracteres.',
-      tags: ['gamma'],
       seekingTags: ['alpha'],
     }),
   );
 
-  const roundResult = await engine.runRound(pool);
-  assert.equal(roundResult.cyclesFound, 1);
-  assert.equal(roundResult.proposalsCreated, 1);
-
-  const [proposal] = await withTransaction(pool, (tx) => matchRepo.findOpenProposalsForUser(tx, userA.id));
-  assert.ok(proposal);
-  await withTransaction(pool, (tx) => engine.accept(tx, userA.id, proposal.id));
+  const { proposal } = await withTransaction(pool, (tx) =>
+    engine.proposeDirectSwap(tx, userA.id, listingA.id, listingB.id),
+  );
   await withTransaction(pool, (tx) => engine.accept(tx, userB.id, proposal.id));
-  const finalAccept = await withTransaction(pool, (tx) => engine.accept(tx, userC.id, proposal.id));
-  assert.equal(finalAccept.allAccepted, true);
 
-  const txAB = await withTransaction(pool, (tx) => transactionsRepo.findOpenByGuild(tx, guildA));
-  const txBC = await withTransaction(pool, (tx) => transactionsRepo.findOpenByGuild(tx, guildB));
-  const txCA = await withTransaction(pool, (tx) => transactionsRepo.findOpenByGuild(tx, guildC));
-  assert.equal(txAB.proposalId, txBC.proposalId);
-  assert.equal(txAB.proposalId, txCA.proposalId);
-
-  for (const t of [txAB, txBC, txCA]) {
+  const txA = await withTransaction(pool, (tx) => transactionsRepo.findOpenByGuild(tx, guildA));
+  const txB = await withTransaction(pool, (tx) => transactionsRepo.findOpenByGuild(tx, guildB));
+  for (const t of [txA, txB]) {
     await withTransaction(pool, (tx) => trial.confirmTrialStarted(tx, t.id, `fake-role-${t.id}`));
   }
 
-  // A backs out of just their own edge — every edge of the cycle must cancel, not just this one.
-  await withTransaction(pool, (tx) => trial.cancel(tx, userA.id, txAB.id, 'user_requested'));
+  // A backs out of just their own edge — the cascade fix (cf. commit c5c4a0e) must
+  // still cancel B's sibling edge too, not just A's — same code path as the old
+  // n-party cycle, now reachable only with exactly 2 parties (A19).
+  await withTransaction(pool, (tx) => trial.cancel(tx, userA.id, txA.id, 'user_requested'));
 
-  const cancelledAB = await withTransaction(pool, (tx) => transactionsRepo.findById(tx, txAB.id));
-  const cancelledBC = await withTransaction(pool, (tx) => transactionsRepo.findById(tx, txBC.id));
-  const cancelledCA = await withTransaction(pool, (tx) => transactionsRepo.findById(tx, txCA.id));
-  assert.equal(cancelledAB.status, 'CANCELLED');
-  assert.equal(cancelledBC.status, 'CANCELLED');
-  assert.equal(cancelledCA.status, 'CANCELLED');
+  const cancelledA = await withTransaction(pool, (tx) => transactionsRepo.findById(tx, txA.id));
+  const cancelledB = await withTransaction(pool, (tx) => transactionsRepo.findById(tx, txB.id));
+  assert.equal(cancelledA.status, 'CANCELLED');
+  assert.equal(cancelledB.status, 'CANCELLED');
 
-  const listingA = await withTransaction(pool, (tx) => listingsRepo.findActiveByGuild(tx, guildA));
-  const listingB = await withTransaction(pool, (tx) => listingsRepo.findActiveByGuild(tx, guildB));
-  const listingC = await withTransaction(pool, (tx) => listingsRepo.findActiveByGuild(tx, guildC));
-  assert.ok(listingA, 'guild A listing should be active again');
-  assert.ok(listingB, 'guild B listing should be active again');
-  assert.ok(listingC, 'guild C listing should be active again');
+  const restoredA = await withTransaction(pool, (tx) => listingsRepo.findActiveByGuild(tx, guildA));
+  const restoredB = await withTransaction(pool, (tx) => listingsRepo.findActiveByGuild(tx, guildB));
+  assert.ok(restoredA, 'guild A listing should be active again');
+  assert.ok(restoredB, 'guild B listing should be active again');
+});
+
+test('A20: the hub thread opens at proposal time, before the other side accepts', async () => {
+  const userA = await makeUser('chat-early-a');
+  const userB = await makeUser('chat-early-b');
+  const guildA = await makeOwnedGuild(userA, 'chat-early-guild-a');
+  const guildB = await makeOwnedGuild(userB, 'chat-early-guild-b');
+
+  const listingA = await withTransaction(pool, (tx) =>
+    listings.create(tx, userA.id, {
+      guildId: guildA,
+      mode: 'echange',
+      description: 'Communaute A pour test ouverture anticipee du chat, vingt.',
+      tags: ['un'],
+      seekingTags: ['deux'],
+    }),
+  );
+  const listingB = await withTransaction(pool, (tx) =>
+    listings.create(tx, userB.id, {
+      guildId: guildB,
+      mode: 'echange',
+      description: 'Communaute B pour test ouverture anticipee du chat, vingt.',
+      tags: ['deux'],
+      seekingTags: ['un'],
+    }),
+  );
+
+  const { proposal, allAccepted } = await withTransaction(pool, (tx) =>
+    engine.proposeDirectSwap(tx, userA.id, listingA.id, listingB.id),
+  );
+  assert.equal(allAccepted, false, 'B has not accepted yet');
+
+  // The whole point: the thread intent already exists, and both transactions already
+  // exist in PROPOSED, well before B has said anything.
+  const { rows: threadIntents } = await pool.query(
+    "SELECT id FROM outbox WHERE channel = 'intent.hub.thread_create' AND payload->>'transactionId' IN (SELECT id::text FROM transactions WHERE proposal_id = $1)",
+    [proposal.id],
+  );
+  assert.equal(threadIntents.length, 2, 'one hub thread per edge, published before acceptance');
+
+  const transactionsForProposal = await withTransaction(pool, (tx) => transactionsRepo.findByProposalId(tx, proposal.id));
+  assert.equal(transactionsForProposal.length, 2);
+  for (const t of transactionsForProposal) {
+    assert.equal(t.status, 'PROPOSED', 'not ACCEPTED yet — B has not responded');
+  }
+
+  await withTransaction(pool, (tx) => engine.accept(tx, userB.id, proposal.id));
+  const afterAccept = await withTransaction(pool, (tx) => transactionsRepo.findByProposalId(tx, proposal.id));
+  for (const t of afterAccept) {
+    assert.equal(t.status, 'ACCEPTED', 'confirmAccepted promotes the pre-existing transactions, never creates new ones');
+  }
+  assert.equal(afterAccept.length, 2, 'still exactly the two transactions created at proposal time');
+});
+
+test('A21: a guild with a matched (unaccepted) listing cannot be given a second listing', async () => {
+  const userA = await makeUser('matched-block-a');
+  const userB = await makeUser('matched-block-b');
+  const guildA = await makeOwnedGuild(userA, 'matched-block-guild-a');
+  const guildB = await makeOwnedGuild(userB, 'matched-block-guild-b');
+
+  const listingA = await withTransaction(pool, (tx) =>
+    listings.create(tx, userA.id, {
+      guildId: guildA,
+      mode: 'echange',
+      description: 'Communaute A pour test du blocage matched, vingt.',
+      tags: ['un'],
+      seekingTags: ['deux'],
+    }),
+  );
+  const listingB = await withTransaction(pool, (tx) =>
+    listings.create(tx, userB.id, {
+      guildId: guildB,
+      mode: 'echange',
+      description: 'Communaute B pour test du blocage matched, vingt.',
+      tags: ['deux'],
+      seekingTags: ['un'],
+    }),
+  );
+
+  // A proposes to B but B never responds — listingA sits `matched`, unaccepted, indefinitely.
+  await withTransaction(pool, (tx) => engine.proposeDirectSwap(tx, userA.id, listingA.id, listingB.id));
+  const matchedA = await withTransaction(pool, (tx) => listingsRepo.findById(tx, listingA.id));
+  assert.equal(matchedA.status, 'matched');
+
+  // A tries to publish a second, unrelated listing on the same guild while the first is still matched.
+  await assert.rejects(
+    () =>
+      withTransaction(pool, (tx) =>
+        listings.create(tx, userA.id, {
+          guildId: guildA,
+          mode: 'don',
+          description: 'Deuxieme annonce sur la meme guilde, vingt caracteres.',
+          tags: ['trois'],
+        }),
+      ),
+    (err) => err.code === 'ERR_GUILD_HAS_ACTIVE_LISTING',
+  );
+});
+
+test('A25: proposeDirectSwap rejects a swap where neither listing offers what the other seeks', async () => {
+  const userA = await makeUser('tag-mismatch-a');
+  const userB = await makeUser('tag-mismatch-b');
+  const guildA = await makeOwnedGuild(userA, 'tag-mismatch-guild-a');
+  const guildB = await makeOwnedGuild(userB, 'tag-mismatch-guild-b');
+
+  const listingA = await withTransaction(pool, (tx) =>
+    listings.create(tx, userA.id, {
+      guildId: guildA,
+      mode: 'echange',
+      description: 'Communaute A qui cherche du jardinage, vingt caracteres.',
+      tags: ['cuisine'],
+      seekingTags: ['jardinage'],
+    }),
+  );
+  // B offers "musique", not "jardinage" — A has nothing to gain from this swap, and B's own
+  // seekingTags ("bricolage") isn't satisfied by A's tags ("cuisine") either: no correspondence
+  // in either direction, so the browse-and-propose freedom (A19) must be caught here instead.
+  const listingB = await withTransaction(pool, (tx) =>
+    listings.create(tx, userB.id, {
+      guildId: guildB,
+      mode: 'echange',
+      description: 'Communaute B qui cherche du bricolage, vingt caracteres.',
+      tags: ['musique'],
+      seekingTags: ['bricolage'],
+    }),
+  );
+
+  await assert.rejects(
+    () => withTransaction(pool, (tx) => engine.proposeDirectSwap(tx, userA.id, listingA.id, listingB.id)),
+    (err) => err.code === 'ERR_TAG_MISMATCH',
+  );
+
+  // Rejected before either listing is claimed — both stay `active`, free to be proposed elsewhere.
+  const stillActiveA = await withTransaction(pool, (tx) => listingsRepo.findById(tx, listingA.id));
+  const stillActiveB = await withTransaction(pool, (tx) => listingsRepo.findById(tx, listingB.id));
+  assert.equal(stillActiveA.status, 'active');
+  assert.equal(stillActiveB.status, 'active');
+});
+
+test('a listing published before the bot joins starts pending_bot, blocks a second attempt, then activates on guildCreate', async () => {
+  const owner = await makeUser('pending-owner');
+  const guildId = uniqueId('pending-guild');
+  await withTransaction(pool, async (tx) => {
+    await guildsRepo.ensureExists(tx, { id: guildId, name: 'pending-guild', ownerDiscordId: owner.discordId, botPresent: false });
+    await ownership.observe(tx, { guildId, ownerDiscordId: owner.discordId, source: 'oauth', observedAt: new Date() });
+  });
+
+  const listing = await withTransaction(pool, (tx) =>
+    listings.create(tx, owner.id, {
+      guildId,
+      mode: 'don',
+      description: 'Communauté de test publiée avant l\'invitation du bot, vingt caractères.',
+      tags: ['jeux-video'],
+    }),
+  );
+  assert.equal(listing.status, 'pending_bot');
+
+  await assert.rejects(
+    () =>
+      withTransaction(pool, (tx) =>
+        listings.create(tx, owner.id, {
+          guildId,
+          mode: 'don',
+          description: 'Deuxième tentative sur la même guilde, vingt caractères.',
+          tags: ['jeux-video'],
+        }),
+      ),
+    (err) => err.code === 'ERR_GUILD_HAS_ACTIVE_LISTING',
+  );
+
+  // Simulates bot/guildWatcher.js:onGuildCreate's activation step.
+  await withTransaction(pool, async (tx) => {
+    await guildsRepo.updatePresence(tx, guildId, { botPresent: true, botRolePosition: 5 });
+    await listings.activatePendingForGuild(tx, guildId);
+  });
+
+  const activated = await withTransaction(pool, (tx) => listingsRepo.findById(tx, listing.id));
+  assert.equal(activated.status, 'active');
+});
+
+test('removing a listing asks the bot to leave only if it was actually there', async () => {
+  const owner = await makeUser('remove-owner');
+
+  const guildWithBot = await makeOwnedGuild(owner, 'remove-guild-bot');
+  const activeListing = await withTransaction(pool, (tx) =>
+    listings.create(tx, owner.id, {
+      guildId: guildWithBot,
+      mode: 'don',
+      description: 'Communauté de test à retirer, vingt caractères minimum garantis.',
+      tags: ['jeux-video'],
+    }),
+  );
+  assert.equal(activeListing.status, 'active');
+  await withTransaction(pool, (tx) => listings.remove(tx, owner.id, activeListing.id));
+  const { rows: leaveIntents } = await pool.query(
+    "SELECT id FROM outbox WHERE channel = $1 AND payload->>'guildId' = $2",
+    [CHANNELS.INTENT_GUILD_LEAVE, guildWithBot],
+  );
+  assert.equal(leaveIntents.length, 1, 'removing an annonce whose guild has the bot should ask it to leave');
+
+  const guildWithoutBot = uniqueId('remove-guild-nobot');
+  await withTransaction(pool, async (tx) => {
+    await guildsRepo.ensureExists(tx, {
+      id: guildWithoutBot,
+      name: 'remove-guild-nobot',
+      ownerDiscordId: owner.discordId,
+      botPresent: false,
+    });
+    await ownership.observe(tx, { guildId: guildWithoutBot, ownerDiscordId: owner.discordId, source: 'oauth', observedAt: new Date() });
+  });
+  const pendingListing = await withTransaction(pool, (tx) =>
+    listings.create(tx, owner.id, {
+      guildId: guildWithoutBot,
+      mode: 'don',
+      description: 'Deuxième communauté de test, jamais rejointe par le bot.',
+      tags: ['jeux-video'],
+    }),
+  );
+  assert.equal(pendingListing.status, 'pending_bot');
+  await withTransaction(pool, (tx) => listings.remove(tx, owner.id, pendingListing.id));
+  const { rows: noLeaveIntents } = await pool.query(
+    "SELECT id FROM outbox WHERE channel = $1 AND payload->>'guildId' = $2",
+    [CHANNELS.INTENT_GUILD_LEAVE, guildWithoutBot],
+  );
+  assert.equal(noLeaveIntents.length, 0, 'a listing removed while pending_bot never had the bot to begin with');
+});
+
+test('removing a listing with no history deletes the row outright', async () => {
+  const owner = await makeUser('harddelete-owner');
+  const guildId = await makeOwnedGuild(owner, 'harddelete-guild');
+
+  const listing = await withTransaction(pool, (tx) =>
+    listings.create(tx, owner.id, {
+      guildId,
+      mode: 'don',
+      description: 'Communaute de test jamais rejointe par un candidat, aucun historique.',
+      tags: ['jeux-video'],
+    }),
+  );
+
+  const result = await withTransaction(pool, (tx) => listings.remove(tx, owner.id, listing.id));
+  assert.equal(result.status, 'removed');
+
+  const stillThere = await withTransaction(pool, (tx) => listingsRepo.findById(tx, listing.id));
+  assert.equal(stillThere, null, 'the row should be physically gone, not just soft-deleted');
+});
+
+test('removing a listing that a candidate ever queued on still deletes the row, orphaning the queue history', async () => {
+  const owner = await makeUser('harddelete-queue-owner');
+  const candidate = await makeUser('harddelete-queue-candidate');
+  const guildId = await makeOwnedGuild(owner, 'harddelete-queue-guild');
+
+  const listing = await withTransaction(pool, (tx) =>
+    listings.create(tx, owner.id, {
+      guildId,
+      mode: 'don',
+      description: 'Communaute de test rejointe puis quittee par un candidat.',
+      tags: ['jeux-video'],
+    }),
+  );
+  await withTransaction(pool, (tx) => queue.enqueue(tx, listing.id, candidate.id));
+  await withTransaction(pool, (tx) => queue.withdraw(tx, listing.id, candidate.id));
+  const { rows: beforeRows } = await pool.query(
+    'SELECT id FROM listing_queue WHERE listing_id = $1 AND candidate_user_id = $2',
+    [listing.id, candidate.id],
+  );
+  assert.equal(beforeRows.length, 1, 'the queue history row should exist before removal');
+
+  const result = await withTransaction(pool, (tx) => listings.remove(tx, owner.id, listing.id));
+  assert.equal(result.status, 'removed');
+
+  const stillThere = await withTransaction(pool, (tx) => listingsRepo.findById(tx, listing.id));
+  assert.equal(stillThere, null, 'listing_queue no longer blocks physical deletion (005: ON DELETE SET NULL)');
+
+  const { rows: afterRows } = await pool.query('SELECT listing_id FROM listing_queue WHERE id = $1', [beforeRows[0].id]);
+  assert.equal(afterRows.length, 1, 'the queue history row itself is kept, not cascaded away');
+  assert.equal(afterRows[0].listing_id, null, 'only the now-dangling reference to the deleted listing is cleared');
+
+  const { rows: removedAudit } = await pool.query(
+    "SELECT id FROM audit_log WHERE target_id = $1 AND action = 'listing.removed'",
+    [listing.id],
+  );
+  assert.equal(removedAudit.length, 1);
 });

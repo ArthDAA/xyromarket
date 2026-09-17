@@ -98,10 +98,11 @@ npm test                                          # unitaires purs (node:test)
 TEST_DATABASE_URL=postgres://... npm run test:db  # nécessite une base Postgres jetable
 ```
 
-Les tests `test:db` partagent une base et doivent tourner en série (`--test-concurrency=1`, déjà configuré). Deux d'entre eux sont des garanties contractuelles, pas de simples tests unitaires :
+Les tests `test:db` partagent une base et doivent tourner en série (`--test-concurrency=1`, déjà configuré). L'un d'entre eux est une garantie contractuelle, pas un simple test unitaire :
 
 - `listPublic.explain.dbtest.js` : zéro `Seq Scan` sur `listings` à 100 000 annonces.
-- `domain/matching/ttc.test.js` : le compteur d'avancées de curseur ne dépasse jamais Σ|prefs| sur l'exécution.
+
+(`domain/matching/ttc.test.js` a existé puis a été retiré avec le moteur TTC — cf. `docs/devnotes/1-CheckList.md` A19 : initier un échange est désormais une action manuelle, `engine.proposeDirectSwap`, plus de cycles n-aires à garantir.)
 
 ## Déploiement (VPS By-Hoster, KVM)
 

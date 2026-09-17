@@ -12,6 +12,15 @@ export class OwnershipError extends Error {
   }
 }
 
+/**
+ * Sentinel `owner_discord_id` meaning "no confirmed owner" — `guilds.owner_discord_id`
+ * is NOT NULL, and no real Discord snowflake is ever the empty string, so this can never
+ * collide with a real user. Used when a source positively observes that a guild's
+ * previously-recorded owner no longer holds it (e.g. the guild was deleted) — see
+ * `web/auth/oauth.js:syncOwnedGuilds`.
+ */
+export const UNOWNED = '';
+
 let staleObservationCount = 0;
 export function getStaleObservationCount() {
   return staleObservationCount;

@@ -67,6 +67,7 @@ async function observeAndUpsert(pool, guild, { botPresent = true } = {}) {
 export async function onGuildCreate(pool, guild) {
   await observeAndUpsert(pool, guild, { botPresent: true });
   await assertHierarchyAndAlert(pool, guild);
+  await withTransaction(pool, (tx) => listings.activatePendingForGuild(tx, guild.id));
 }
 
 export async function onGuildUpdate(pool, oldGuild, newGuild) {
@@ -99,7 +100,25 @@ export async function onReady(pool, client) {
   for (const guild of client.guilds.cache.values()) {
     await observeAndUpsert(pool, guild, { botPresent: true });
     await assertHierarchyAndAlert(pool, guild);
+    // `guildCreate` never fires for a guild the bot already joined before this reconnect —
+    // this is the only other place a `pending_bot` annonce published during the outage gets activated.
+    await withTransaction(pool, (tx) => listings.activatePendingForGuild(tx, guild.id));
   }
+}
+
+/**
+ * `intent.guild.leave` handler — a plain guild-membership action requested by
+ * `domain/listings.js:remove()` once nothing on the guild needs the bot
+ * there anymore. Colocated here rather than in a dedicated file for a single
+ * action; signature matches every other `intent.*` handler (`pool` unused,
+ * kept for consistency). Leaving fires Discord's own `guildDelete`, which
+ * `onGuildDelete` above already handles (`bot_present: false`, hide
+ * listings) — this function only asks Discord to leave, never touches the DB.
+ */
+export async function onIntentGuildLeave(pool, client, { guildId }) {
+  const guild = await client.guilds.fetch(guildId).catch(() => null);
+  if (!guild) return; // Already gone (kicked manually, or the invite never completed) — nothing to do.
+  await guild.leave();
 }
 
 /**

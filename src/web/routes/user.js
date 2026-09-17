@@ -215,7 +215,9 @@ export default async function userRoutes(app, { pool }) {
         title: 'Tableau de bord',
         noindex: true,
         body: `<h1>Bonjour ${escapeHtml(req.user.username)}</h1>
-<p><a href="/annonces/nouvelle">Créer une annonce</a> · <a href="/matchs">Mes propositions</a> · <a href="/me/export">Exporter mes données</a> ·
+<p><a href="/annonces/nouvelle">Créer une annonce</a> · <a href="/matchs">Mes propositions</a> · <a href="/me/export">Exporter mes données</a>${
+  req.caps.size > 0 ? ' · <a href="/admin">Panel admin</a>' : ''
+} ·
 <form method="POST" action="/auth/logout" style="display:inline"><button type="submit">Se déconnecter</button></form></p>
 ${
   hubInviteUrl

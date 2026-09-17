@@ -5,6 +5,7 @@ import * as reputation from '../../domain/reputation.js';
 import { usersRepo } from '../../db/repositories/usersRepo.js';
 import { guildsRepo } from '../../db/repositories/guildsRepo.js';
 import { listingsRepo } from '../../db/repositories/listingsRepo.js';
+import { listingQueueRepo } from '../../db/repositories/listingQueueRepo.js';
 import { layout, legalPage, escapeHtml } from '../render.js';
 import * as oauth from '../auth/oauth.js';
 import * as session from '../auth/session.js';
@@ -28,6 +29,45 @@ const LEGAL_PAGES = {
   '/signalement': 'Signaler un contenu ou un utilisateur',
   '/retractation': 'Droit de rétractation (service actuellement gratuit)',
 };
+
+/**
+ * Batch-fetches the guild/owner rows a page of listings references, for
+ * display — one query per table, never one per row. Server name + owner
+ * alias are public since A28 (deliberate: makes them searchable via
+ * `listingsRepo.search`, so hiding them again on the list itself would be
+ * inconsistent — a visitor who found a listing by its server name would
+ * otherwise not see that name confirmed anywhere).
+ */
+async function lookupMaps(tx, items) {
+  const guildIds = [...new Set(items.map((l) => l.guildId))];
+  const userIds = [...new Set(items.map((l) => l.userId))];
+  const [guilds, users] = await Promise.all([guildsRepo.findByIds(tx, guildIds), usersRepo.findByIds(tx, userIds)]);
+  return {
+    guildById: new Map(guilds.map((g) => [g.id, g])),
+    userById: new Map(users.map((u) => [u.id, u])),
+  };
+}
+
+/** Shared `<ul>` markup for a page of public listings — used by both `/` (preview) and `/annonces` (full list/search results). */
+function listingsListHtml(items, { guildById, userById }) {
+  if (items.length === 0) return '<p>Aucune annonce publiée pour l\'instant.</p>';
+  return `<ul>${items
+    .map((l) => {
+      const guild = guildById.get(l.guildId);
+      const owner = userById.get(l.userId);
+      return `<li><a href="/annonces/${l.id}">${escapeHtml(l.description.slice(0, 80))}</a> — ${escapeHtml(l.mode)}
+ — ${escapeHtml(guild?.name || l.guildId)}${owner ? ` — par <a href="/u/${owner.id}">${escapeHtml(owner.username)}</a>` : ''}</li>`;
+    })
+    .join('')}</ul>`;
+}
+
+/** 404 with an actual explanation instead of a bare "404" — same shape as `renderFormError` in user.js. */
+function notFoundPage(reply, message) {
+  return reply
+    .code(404)
+    .type('text/html')
+    .send(layout({ title: 'Introuvable', body: `<h1>Introuvable</h1><p>${escapeHtml(message)}</p><p><a href="/">Retour à l'accueil</a></p>` }));
+}
 
 /**
  * Showcase, public listing search and every legal page (M8). No mutation
@@ -116,59 +156,165 @@ export default async function publicRoutes(app, { pool }) {
          </form>`
       : `<a href="/auth/discord">Se connecter avec Discord</a>`;
 
+    const { page, guildById, userById } = await withTransaction(pool, async (tx) => {
+      const p = await listings.listPublic(tx, {}, {});
+      return { page: p, ...(await lookupMaps(tx, p.items)) };
+    });
+
+    reply.header('Cache-Control', 'private, max-age=0');
     reply.type('text/html').send(
       layout({
         title: 'Accueil',
         body: `<h1>Xyro Market</h1>
 <p>Échangez ou donnez votre serveur Discord.</p>
-<p><a href="/annonces">Voir les annonces</a> · ${accountLine}</p>`,
+<form method="GET" action="/annonces">
+<label>Rechercher un utilisateur, un alias, un serveur ou un tag <input type="text" name="search"></label>
+<button type="submit">Chercher</button>
+</form>
+<p><a href="/annonces">Rechercher / filtrer les annonces</a> · ${accountLine}</p>
+<h2>Annonces</h2>
+${listingsListHtml(page.items, { guildById, userById })}
+${page.cursor ? `<p><a href="/annonces?cursor=${encodeURIComponent(page.cursor)}">Voir plus</a></p>` : ''}`,
       }),
     );
   });
 
   app.get('/annonces', async (req, reply) => {
-    const { tags, mode, q, cursor } = req.query;
+    const { tags, mode, q, search, cursor } = req.query;
+    if (typeof search === 'string' && search.trim().length > 0) {
+      const term = search.trim().toLowerCase();
+      const { hits, guildById, userById, userHits } = await withTransaction(pool, async (tx) => {
+        const [h, uh] = await Promise.all([
+          listingsRepo.search(tx, term, { status: 'active', limit: 20 }),
+          usersRepo.searchByUsername(tx, term, { limit: 10 }),
+        ]);
+        return { hits: h, userHits: uh, ...(await lookupMaps(tx, h)) };
+      });
+      reply.header('Cache-Control', 'private, max-age=0');
+      return reply.type('text/html').send(
+        layout({
+          title: 'Recherche',
+          body: `<h1>Recherche : ${escapeHtml(search.trim())}</h1>
+<form method="GET" action="/annonces">
+<input type="text" name="search" value="${escapeHtml(search.trim())}">
+<button type="submit">Chercher</button>
+</form>
+<h2>Utilisateurs (${userHits.length})</h2>
+${
+  userHits.length === 0
+    ? '<p>Aucun.</p>'
+    : `<ul>${userHits.map((u) => `<li><a href="/u/${u.id}">${escapeHtml(u.username)}</a>${u.isVerified ? ' ✓ Vérifié' : ''}</li>`).join('')}</ul>`
+}
+<h2>Annonces (${hits.length})</h2>
+${listingsListHtml(hits, { guildById, userById })}`,
+        }),
+      );
+    }
     const filters = {
       tags: typeof tags === 'string' && tags.length > 0 ? tags.split(',') : undefined,
       mode: mode === 'don' || mode === 'echange' ? mode : undefined,
       q: typeof q === 'string' && q.length > 0 ? q : undefined,
     };
-    const page = await withTransaction(pool, (tx) => listings.listPublic(tx, filters, { cursor }));
+    const { page, guildById, userById } = await withTransaction(pool, async (tx) => {
+      const p = await listings.listPublic(tx, filters, { cursor });
+      return { page: p, ...(await lookupMaps(tx, p.items)) };
+    });
 
     reply.header('Cache-Control', 'private, max-age=0');
     reply.type('text/html').send(
       layout({
         title: 'Annonces',
-        body: `<h1>Annonces</h1><ul>${page.items
-          .map(
-            (l) =>
-              `<li><a href="/annonces/${l.id}">${escapeHtml(l.description.slice(0, 80))}</a> — ${escapeHtml(l.mode)}</li>`,
-          )
-          .join('')}</ul>${page.cursor ? `<a href="/annonces?cursor=${encodeURIComponent(page.cursor)}">Suivant</a>` : ''}`,
+        body: `<h1>Annonces</h1>
+<form method="GET" action="/annonces">
+<label>Rechercher un utilisateur, un alias, un serveur ou un tag <input type="text" name="search"></label>
+<button type="submit">Chercher</button>
+</form>
+${listingsListHtml(page.items, { guildById, userById })}
+${page.cursor ? `<p><a href="/annonces?cursor=${encodeURIComponent(page.cursor)}">Suivant</a></p>` : ''}`,
       }),
     );
   });
 
-  app.get('/annonces/:id', async (req, reply) => {
+  /**
+   * Contact happens only through the matching flow (M5, O2 — no DM relay, no direct
+   * messaging on the site): join the file d'attente for a `don`, or manually propose
+   * a direct swap for an `echange` (A19 — replaces the old automatic TTC discovery,
+   * find a compatible listing yourself via `/annonces?mode=echange&tags=...`) — the
+   * bot opens a private hub thread only once the two sides are actually matched.
+   */
+  app.get('/annonces/:id', { preHandler: [session.tryAuth(pool)] }, async (req, reply) => {
     const result = await withTransaction(pool, async (tx) => {
       const listing = await listingsRepo.findById(tx, req.params.id);
       if (!listing || listing.status === 'hidden' || listing.status === 'removed') return null;
-      const guild = await guildsRepo.findById(tx, listing.guildId);
-      return { listing, guild };
+      const [guild, owner] = await Promise.all([
+        guildsRepo.findById(tx, listing.guildId),
+        usersRepo.findById(tx, listing.userId),
+      ]);
+      const isOwner = req.user?.id === listing.userId;
+      const alreadyQueued =
+        req.user && !isOwner && listing.mode === 'don'
+          ? Boolean(await listingQueueRepo.findActiveEntry(tx, listing.id, req.user.id))
+          : false;
+      // Candidates to offer in a swap: my own active `echange` listings, elsewhere.
+      const myEchangeListings =
+        req.user && !isOwner && listing.mode === 'echange'
+          ? (await listingsRepo.listByUser(tx, req.user.id, { limit: 50 })).items.filter(
+              (l) => l.mode === 'echange' && l.status === 'active' && l.id !== listing.id,
+            )
+          : [];
+      return { listing, guild, owner, isOwner, alreadyQueued, myEchangeListings };
     });
     if (!result) {
-      return reply.code(404).type('text/html').send(layout({ title: 'Introuvable', body: '<h1>404</h1>' }));
+      return notFoundPage(reply, 'Cette annonce n\'existe pas, ou a été retirée par son propriétaire.');
     }
-    const { listing, guild } = result;
+    const { listing, guild, owner, isOwner, alreadyQueued, myEchangeListings } = result;
+
+    let contactSection;
+    if (isOwner) {
+      contactSection = `<p>C'est ton annonce. <a href="/annonces/${listing.id}/modifier">Modifier</a> · <a href="/tableau-de-bord">Retirer</a></p>`;
+    } else if (!req.user) {
+      contactSection = `<p><a href="/auth/discord">Se connecter avec Discord</a> pour manifester ton intérêt.</p>`;
+    } else if (listing.mode === 'echange') {
+      const csrfToken = session.issueCsrfToken(req.csrfSecret);
+      contactSection =
+        myEchangeListings.length === 0
+          ? `<p>Pour proposer un échange, publie d'abord ta propre annonce en mode "échange" — <a href="/annonces/nouvelle">créer une annonce</a>.</p>`
+          : `<form method="POST" action="/annonces/${listing.id}/echanger">
+<input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">
+<label for="myListingId">Proposer en échange :</label>
+<select id="myListingId" name="myListingId" required>
+${myEchangeListings.map((l) => `<option value="${escapeHtml(l.id)}">${escapeHtml(l.description.slice(0, 60))}</option>`).join('')}
+</select>
+<button type="submit">Proposer cet échange</button>
+</form>
+<p>Pas de message direct : si le propriétaire accepte, une discussion privée s'ouvre automatiquement sur le serveur hub Discord.</p>`;
+    } else if (alreadyQueued) {
+      const csrfToken = session.issueCsrfToken(req.csrfSecret);
+      contactSection = `<p>Tu es déjà dans la file d'attente pour cette annonce.</p>
+<form method="POST" action="/annonces/${listing.id}/file/quitter">
+<input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">
+<button type="submit">Me retirer de la file</button>
+</form>`;
+    } else {
+      const csrfToken = session.issueCsrfToken(req.csrfSecret);
+      contactSection = `<form method="POST" action="/annonces/${listing.id}/file">
+<input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">
+<button type="submit">Je suis intéressé(e)</button>
+</form>
+<p>Pas de message direct : le propriétaire choisit dans l'ordre d'arrivée, et une discussion privée s'ouvre automatiquement sur le serveur hub Discord une fois sélectionné(e).</p>`;
+    }
+
     reply.header('Cache-Control', 'private, max-age=0');
     reply.type('text/html').send(
       layout({
         title: 'Annonce',
         body: `<h1>${escapeHtml(listing.mode)}</h1>
+<p>Serveur : ${escapeHtml(guild?.name || listing.guildId)}${owner ? ` — publiée par <a href="/u/${owner.id}">${escapeHtml(owner.username)}</a>` : ''}</p>
 <p>${escapeHtml(listing.description)}</p>
 <p>Tags : ${listing.tags.map(escapeHtml).join(', ')}</p>
 ${listing.mode === 'echange' ? `<p>Recherché : ${listing.seekingTags.map(escapeHtml).join(', ')}</p>` : ''}
-<p>Taille de la communauté (informatif) : ${guild?.memberCountCached ?? 'inconnue'}</p>`,
+<p>Taille de la communauté (informatif) : ${guild?.memberCountCached ?? 'inconnue'}</p>
+${contactSection}`,
       }),
     );
   });
@@ -177,19 +323,31 @@ ${listing.mode === 'echange' ? `<p>Recherché : ${listing.seekingTags.map(escape
     const result = await withTransaction(pool, async (tx) => {
       const user = await usersRepo.findById(tx, req.params.id);
       if (!user || user.deletedAt) return null;
-      const aggregate = await reputation.aggregate(tx, user.id);
-      return { user, aggregate };
+      const [aggregate, activeListings] = await Promise.all([
+        reputation.aggregate(tx, user.id),
+        listingsRepo.listByUser(tx, user.id, { status: 'active', limit: 50 }),
+      ]);
+      const guilds = await guildsRepo.findByIds(tx, [...new Set(activeListings.items.map((l) => l.guildId))]);
+      return { user, aggregate, listings: activeListings.items, guildById: new Map(guilds.map((g) => [g.id, g])) };
     });
     if (!result) {
-      return reply.code(404).type('text/html').send(layout({ title: 'Introuvable', body: '<h1>404</h1>' }));
+      return notFoundPage(reply, 'Ce profil n\'existe pas, ou son compte a été supprimé.');
     }
-    const { user, aggregate } = result;
+    const { user, aggregate, listings, guildById } = result;
     reply.type('text/html').send(
       layout({
         title: user.username,
         // No raw discord_id on a public profile — internal id only.
         body: `<h1>${escapeHtml(user.username)}${user.isVerified ? ' ✓ Vérifié' : ''}</h1>
-<p>Avis : ${aggregate.count} (moyenne ${aggregate.average ?? 'N/A'})</p>`,
+<p>Avis : ${aggregate.count} (moyenne ${aggregate.average ?? 'N/A'})</p>
+<h2>Serveurs (${listings.length})</h2>
+${
+  listings.length === 0
+    ? '<p>Aucune annonce active pour l\'instant.</p>'
+    : `<ul>${listings
+        .map((l) => `<li><a href="/annonces/${l.id}">${escapeHtml(guildById.get(l.guildId)?.name || l.guildId)}</a> — ${escapeHtml(l.mode)}</li>`)
+        .join('')}</ul>`
+}`,
       }),
     );
   });
