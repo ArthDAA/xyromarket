@@ -29,10 +29,16 @@ async function getNegotiationChannel(client) {
  * touching Discord itself.
  */
 export async function ensureHubInvite(pool, client, logger) {
-  const channel = await getNegotiationChannel(client);
-  if (!channel) return; // ERR_MISSING_PERMISSIONS — same fallback as thread creation, alerted separately
-
   try {
+    // `getNegotiationChannel` included in this same try — a REST fetch (`client.guilds.fetch`,
+    // e.g. `ERR_UNKNOWN_GUILD` if the bot isn't actually a member of `DISCORD_HUB_GUILD_ID`
+    // right now) is just as capable of rejecting as `createInvite` below, and used to do so
+    // *outside* this block — uncaught, which broke this function's own contract (see the doc
+    // comment above): the caller (`bot/main.js`) now also isolates this call, but this function
+    // claims "never fatal" on its own terms and should actually be that, not rely on the caller.
+    const channel = await getNegotiationChannel(client);
+    if (!channel) return; // ERR_MISSING_PERMISSIONS — same fallback as thread creation, alerted separately
+
     // `unique: false` (the default) has Discord return an existing matching invite instead of
     // minting a new one each boot — no separate fetch-then-check needed, and no `MANAGE_GUILD`
     // permission required (unlike listing a guild's invites, which fetching ourselves would).
@@ -42,9 +48,10 @@ export async function ensureHubInvite(pool, client, logger) {
     await withTransaction(pool, (tx) => settingsRepo.set(tx, 'hub_invite_url', invite.url, null));
   } catch (err) {
     // ERR_MISSING_PERMISSIONS (CREATE_INSTANT_INVITE likely absent from the hub bot's role —
-    // not in the permission set README.md documents) — never fatal, `bus.start()` must still
-    // run right after this call, but must not go completely silent either: without this link
-    // the whole hub-chat mechanism is unreachable for anyone not already a hub member (A22).
+    // not in the permission set README.md documents) or the guild fetch itself failing — never
+    // fatal, `bus.start()` must still run right after this call, but must not go completely
+    // silent either: without this link the whole hub-chat mechanism is unreachable for anyone
+    // not already a hub member (A22).
     logger?.warn({ err: err.message }, 'ensureHubInvite failed — no hub_invite_url will be shown on the site');
   }
 }
@@ -106,13 +113,44 @@ export async function onIntentHubThreadCreate(pool, client, { transactionId, par
   );
 }
 
-/** Posted on every `event.transaction.updated` — a message into an archived thread un-archives it (used by `dispute.open`). */
+/**
+ * Posted on every `event.transaction.updated` — a message into an archived
+ * thread un-archives it (used by `dispute.open`). A34: the two outcomes a
+ * trial period actually runs out to (real transfer confirmed, or nobody
+ * validated in time) both get a clearer "Échange terminé" message instead
+ * of the raw status line — from the two parties' point of view it's the
+ * same closing signal either way, just with a different reason.
+ */
 export async function onEventTransactionUpdated(pool, client, { transactionId, to }) {
   const transaction = await withTransaction(pool, (tx) => transactionsRepo.findById(tx, transactionId));
   if (!transaction?.hubThreadId) return;
   const thread = await client.channels.fetch(transaction.hubThreadId).catch(() => null);
   if (!thread) return;
+
+  if (to === 'TRANSFERRED') {
+    await thread.send('✅ Échange terminé — le transfert de propriété a été confirmé.').catch(() => {});
+    return;
+  }
+  if (to === 'EXPIRED') {
+    await thread
+      .send('❌ Échange terminé — la période d\'essai s\'est achevée sans validation des deux parties, l\'échange est caduc.')
+      .catch(() => {});
+    return;
+  }
   await thread.send(`Statut de la transaction : **${to}**.`).catch(() => {});
+}
+
+/** `intent.trial.reminder` handler (A34) — posted once, ~24h before `trial_ends_at`, into the hub thread. */
+export async function onIntentTrialReminder(pool, client, { transactionId, trialEndsAt }) {
+  const transaction = await withTransaction(pool, (tx) => transactionsRepo.findById(tx, transactionId));
+  if (!transaction?.hubThreadId) return;
+  const thread = await client.channels.fetch(transaction.hubThreadId).catch(() => null);
+  await thread
+    ?.send(
+      `⏰ La période d'essai se termine le ${new Date(trialEndsAt).toLocaleString('fr-FR')}. ` +
+        'Validez le transfert depuis votre tableau de bord Xyro Market une fois prêt·e·s — sinon l\'échange devient caduc automatiquement à l\'échéance.',
+    )
+    .catch(() => {});
 }
 
 /**

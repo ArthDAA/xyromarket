@@ -2,7 +2,7 @@ import { mapRow } from './shared.js';
 
 /** Coded defaults used when a key is absent from the `settings` table. */
 const DEFAULTS = {
-  trial_duration_days: 7,
+  trial_duration_days: 3,
   dispute_window_days: 14,
   match_proposal_ttl_hours: 24,
   verified_rules: { minTransactions: 3, minAverage: 4, minAccountAgeDays: 30, noActiveSanction: true },

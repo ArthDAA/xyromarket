@@ -58,7 +58,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"     
 1. Créer l'application sur [discord.com/developers/applications](https://discord.com/developers/applications).
 2. Onglet **OAuth2** : récupérer Client ID / Client Secret. Ajouter en Redirect URL : `${PUBLIC_BASE_URL}/auth/discord/callback`.
 3. Onglet **Bot** : créer le bot, copier le token. **Ne rien activer sous "Privileged Gateway Intents"** — le bot ne demande que `Guilds` et `GuildModeration`, tous deux non privilégiés.
-4. Générer l'URL d'invitation (OAuth2 > URL Generator), scope `bot`, permissions minimales : `Manage Roles`, `View Audit Log`, `Send Messages`, `Create Private Threads`, `Send Messages in Threads`, `Manage Threads`.
+4. Générer l'URL d'invitation (OAuth2 > URL Generator), scopes `bot` **et** `applications.commands` (sans ce second scope, l'enregistrement des commandes slash sur cette guilde échoue en 403 "Missing Access" — cf. `bot/main.js:registerCommands`, non fatal pour le process depuis A34 mais `/signaler` reste alors indisponible sur cette guilde), permissions minimales : `Manage Roles`, `View Audit Log`, `Send Messages`, `Create Private Threads`, `Send Messages in Threads`, `Manage Threads`, `Create Instant Invite` (A34 — invite envoyée à un destinataire d'essai pas encore membre de la guilde cible ; absente sur un serveur déjà invité avant ce changement, tant que son propriétaire ne relance pas l'invitation du bot ou n'accorde pas la permission manuellement).
 
 ### Hiérarchie des rôles (par serveur cédé)
 

@@ -60,6 +60,7 @@ async function main() {
   bus.subscribe(CHANNELS.INTENT_ANNOUNCE_HANDOVER, (payload) => announce.onIntentAnnounceHandover(pool, client, payload));
   bus.subscribe(CHANNELS.INTENT_GUILD_LEAVE, (payload) => guildWatcher.onIntentGuildLeave(pool, client, payload));
   bus.subscribe(CHANNELS.EVENT_TRANSACTION_UPDATED, (payload) => hub.onEventTransactionUpdated(pool, client, payload));
+  bus.subscribe(CHANNELS.INTENT_TRIAL_REMINDER, (payload) => hub.onIntentTrialReminder(pool, client, payload));
   // transfer.js's handler is pure domain logic (DB + further intents, no Discord calls of its
   // own) — hosted here because bot already holds the one long-lived bus connection; see
   // DebugNotes for why no other process subscribes to event.ownership.changed.
@@ -67,8 +68,15 @@ async function main() {
 
   client.on(Events.ClientReady, async () => {
     logger.info('bot ready, reconciling guild cache');
-    await guildWatcher.onReady(pool, client);
-    await hub.ensureHubInvite(pool, client, logger);
+    // Each step isolated, same defensive shape as every other listener below (`.catch` ->
+    // `logger.error`, never propagate) — `onReady`/`ensureHubInvite` failing (e.g. the hub
+    // guild temporarily unreachable, `ERR_GUILD_UNAVAILABLE`-adjacent) must never block
+    // `bus.start()`: an uncaught rejection here used to silently prevent it from ever running,
+    // which means the bot would sit connected to the gateway but process **no** intents at all
+    // — role assignment, hub threads, everything — with nothing louder than a stray gateway
+    // error event to notice by.
+    await guildWatcher.onReady(pool, client).catch((err) => logger.error({ err }, 'onReady failed'));
+    await hub.ensureHubInvite(pool, client, logger).catch((err) => logger.error({ err }, 'ensureHubInvite failed'));
     await bus.start();
   });
   client.on(Events.GuildCreate, (guild) => guildWatcher.onGuildCreate(pool, guild).catch((err) => logger.error({ err }, 'onGuildCreate failed')));
@@ -90,6 +98,16 @@ async function main() {
 
   try {
     await registerCommands();
+  } catch (err) {
+    // ERR_COMMAND_REGISTRATION_FAILED — never fatal on its own: a guild-scoped `PUT` failing
+    // (e.g. the hub guild's bot install predates `applications.commands` being requested,
+    // cf. `web/auth/oauth.js:buildBotInviteUrl`) must not take the whole bot down with it.
+    // `/signaler` staying unregistered/stale is real but recoverable (re-run once the scope
+    // is granted); a bot that never even logs in over it is strictly worse.
+    logger.error({ err }, 'ERR_COMMAND_REGISTRATION_FAILED');
+  }
+
+  try {
     await client.login(Config.discordBotToken);
   } catch (err) {
     logger.fatal({ err }, 'ERR_TOKEN_INVALID');

@@ -179,6 +179,29 @@ export const transactionsRepo = {
     return mapRow(rows[0]) ?? null;
   },
 
+  /** ACCEPTED transactions whose trial hasn't started — still waiting on the recipient to join the target guild (A34). */
+  async findAcceptedAwaitingTrial(tx) {
+    const { rows } = await tx.query("SELECT * FROM transactions WHERE status = 'ACCEPTED' AND trial_started_at IS NULL");
+    return rows.map(mapRow);
+  },
+
+  /** TRIAL transactions ending at or before `before`, not yet reminded (A34 — `jobs.trialReminderTick`). */
+  async findTrialsEndingSoon(tx, before) {
+    const { rows } = await tx.query(
+      "SELECT * FROM transactions WHERE status = 'TRIAL' AND trial_ends_at <= $1 AND trial_reminder_sent_at IS NULL",
+      [before],
+    );
+    return rows.map(mapRow);
+  },
+
+  async setInviteSent(tx, id, at) {
+    await tx.query('UPDATE transactions SET invite_sent_at = $2 WHERE id = $1', [id, at]);
+  },
+
+  async setTrialReminderSent(tx, id, at) {
+    await tx.query('UPDATE transactions SET trial_reminder_sent_at = $2 WHERE id = $1', [id, at]);
+  },
+
   async setAnnounced(tx, id, announcedAt) {
     await tx.query('UPDATE transactions SET announced_at = $2, updated_at = now() WHERE id = $1', [
       id,

@@ -548,3 +548,78 @@ test('removing a listing that a candidate ever queued on still deletes the row, 
   );
   assert.equal(removedAudit.length, 1);
 });
+
+/** Minimal FK-satisfying `match_proposals` row — no listings/participants needed for A34's repo-level tests below. */
+async function makeBareProposal() {
+  const { rows } = await pool.query(
+    "INSERT INTO match_proposals (kind, expires_at, status) VALUES ('queue', now() + interval '1 day', 'accepted') RETURNING id",
+  );
+  return rows[0].id;
+}
+
+test('A34: findAcceptedAwaitingTrial only returns ACCEPTED transactions whose trial has not started', async () => {
+  const giver = await makeUser('a34-accepted-giver');
+  const receiver = await makeUser('a34-accepted-receiver');
+  const proposalId = await makeBareProposal();
+
+  // Two separate guilds — `uniq_transactions_open_guild` allows only one non-terminal
+  // transaction per guild, and both of these are still open (ACCEPTED/TRIAL).
+  const guildA = await makeOwnedGuild(giver, 'a34-accepted-guild-a');
+  const guildB = await makeOwnedGuild(giver, 'a34-accepted-guild-b');
+
+  const waitingOnInvite = await withTransaction(pool, (tx) =>
+    transactionsRepo.insert(tx, { proposalId, fromUserId: giver.id, toUserId: receiver.id, guildId: guildA, status: 'ACCEPTED' }),
+  );
+  // A sibling that already started its trial clock must not show up as "awaiting".
+  const alreadyTrialing = await withTransaction(pool, (tx) =>
+    transactionsRepo.insert(tx, { proposalId, fromUserId: giver.id, toUserId: receiver.id, guildId: guildB, status: 'ACCEPTED' }),
+  );
+  await withTransaction(pool, (tx) =>
+    transactionsRepo.setTrialWindow(tx, alreadyTrialing.id, {
+      trialStartedAt: new Date(),
+      trialEndsAt: new Date(Date.now() + 3 * 86_400_000),
+      trialRoleId: 'fake-role-id',
+    }),
+  );
+
+  const awaiting = await withTransaction(pool, (tx) => transactionsRepo.findAcceptedAwaitingTrial(tx));
+  const awaitingIds = awaiting.map((t) => t.id);
+  assert.ok(awaitingIds.includes(waitingOnInvite.id), 'still-ACCEPTED, trial not started -> awaiting');
+  assert.ok(!awaitingIds.includes(alreadyTrialing.id), 'trial already started -> no longer awaiting');
+});
+
+test('A34: findTrialsEndingSoon respects the cutoff and the reminder-already-sent guard', async () => {
+  const giver = await makeUser('a34-reminder-giver');
+  const receiver = await makeUser('a34-reminder-receiver');
+  const proposalId = await makeBareProposal();
+
+  // One guild per trial — same `uniq_transactions_open_guild` reason as the test above.
+  async function makeTrial(hoursUntilEnd) {
+    const guildId = await makeOwnedGuild(giver, 'a34-reminder-guild');
+    const t = await withTransaction(pool, (tx) =>
+      transactionsRepo.insert(tx, { proposalId, fromUserId: giver.id, toUserId: receiver.id, guildId, status: 'ACCEPTED' }),
+    );
+    await withTransaction(pool, (tx) =>
+      transactionsRepo.setTrialWindow(tx, t.id, {
+        trialStartedAt: new Date(),
+        trialEndsAt: new Date(Date.now() + hoursUntilEnd * 3_600_000),
+        trialRoleId: 'fake-role-id',
+      }),
+    );
+    await pool.query("UPDATE transactions SET status = 'TRIAL' WHERE id = $1", [t.id]);
+    return t.id;
+  }
+
+  const endingSoon = await makeTrial(12); // within the 24h window
+  const endingLater = await makeTrial(48); // outside it
+  const alreadyReminded = await makeTrial(6);
+  await withTransaction(pool, (tx) => transactionsRepo.setTrialReminderSent(tx, alreadyReminded, new Date()));
+
+  const cutoff = new Date(Date.now() + 24 * 3_600_000);
+  const dueSoon = await withTransaction(pool, (tx) => transactionsRepo.findTrialsEndingSoon(tx, cutoff));
+  const dueSoonIds = dueSoon.map((t) => t.id);
+
+  assert.ok(dueSoonIds.includes(endingSoon), 'ends within the window, never reminded -> due');
+  assert.ok(!dueSoonIds.includes(endingLater), 'ends outside the window -> not due yet');
+  assert.ok(!dueSoonIds.includes(alreadyReminded), 'already reminded -> not returned again');
+});

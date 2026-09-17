@@ -4,7 +4,7 @@ import { Config } from '../config/env.js';
 import { LOCK_KEYS, jobLockKey } from '../config/lockKeys.js';
 import { createPool, closePool, withAdvisoryLock, withTransaction } from '../db/pool.js';
 import { hasPendingMigrations } from '../db/migrations/run.js';
-import { createBusListener, sweepOutbox, CHANNELS } from '../bus/events.js';
+import { createBusListener, sweepOutbox, publish, CHANNELS } from '../bus/events.js';
 import { guildsRepo } from '../db/repositories/guildsRepo.js';
 import { transactionsRepo } from '../db/repositories/transactionsRepo.js';
 import { usersRepo } from '../db/repositories/usersRepo.js';
@@ -88,6 +88,49 @@ async function trialExpiryTick(pool) {
     await withTransaction(pool, (tx) => gdpr.executeDeletion(tx, u.id)).catch((err) =>
       logger.error({ err: err.message, userId: u.id }, 'gdpr.executeDeletion failed'),
     );
+  }
+}
+
+// ------------------------------------------------------ acceptedInviteRetry
+// A34: `bot/trialRole.js` sends the target-guild invite once, the first time
+// role assignment finds the recipient absent — this is what notices they
+// actually joined later and re-fires `intent.trial.assign` so the role
+// assignment itself can be retried. REST-only (never the gateway client),
+// like the rest of `jobs` — never polls forever: a transaction that leaves
+// `ACCEPTED` (cancelled, or trial started) simply stops being returned by
+// `findAcceptedAwaitingTrial`.
+
+async function acceptedInviteRetryTick(pool) {
+  const waiting = await withTransaction(pool, (tx) => transactionsRepo.findAcceptedAwaitingTrial(tx));
+  for (const t of waiting) {
+    const toUser = await withTransaction(pool, (tx) => usersRepo.findById(tx, t.toUserId));
+    if (!toUser) continue;
+    const member = await fetchMemberRest(t.guildId, toUser.discordId).catch((err) => {
+      logger.error({ err: err.message, transactionId: t.id }, 'acceptedInviteRetry member check failed');
+      return null;
+    });
+    if (!member) continue; // still hasn't joined — checked again next tick
+
+    await withTransaction(pool, (tx) =>
+      publish(tx, CHANNELS.INTENT_TRIAL_ASSIGN, { guildId: t.guildId, memberDiscordId: toUser.discordId, transactionId: t.id }),
+    ).catch((err) => logger.error({ err: err.message, transactionId: t.id }, 'acceptedInviteRetry republish failed'));
+  }
+}
+
+// ------------------------------------------------------------- trialReminder
+// A34: one-time reminder into the hub thread before a trial's clock runs
+// out. Hourly cadence is plenty granular against a 24h window.
+
+const TRIAL_REMINDER_WINDOW_MS = 24 * 3600 * 1000;
+
+async function trialReminderTick(pool) {
+  const cutoff = new Date(Date.now() + TRIAL_REMINDER_WINDOW_MS);
+  const dueSoon = await withTransaction(pool, (tx) => transactionsRepo.findTrialsEndingSoon(tx, cutoff));
+  for (const t of dueSoon) {
+    await withTransaction(pool, async (tx) => {
+      await publish(tx, CHANNELS.INTENT_TRIAL_REMINDER, { transactionId: t.id, trialEndsAt: t.trialEndsAt });
+      await transactionsRepo.setTrialReminderSent(tx, t.id, new Date());
+    }).catch((err) => logger.error({ err: err.message, transactionId: t.id }, 'trialReminder failed'));
   }
 }
 
@@ -228,6 +271,8 @@ async function main() {
   const intervals = [
     setInterval(() => guardedTick(pool, 'matchRound', () => matchRoundTick(pool)), 5 * 60 * 1000),
     setInterval(() => guardedTick(pool, 'trialExpiry', () => trialExpiryTick(pool)), 10 * 60 * 1000),
+    setInterval(() => guardedTick(pool, 'acceptedInviteRetry', () => acceptedInviteRetryTick(pool)), 10 * 60 * 1000),
+    setInterval(() => guardedTick(pool, 'trialReminder', () => trialReminderTick(pool)), 60 * 60 * 1000),
     setInterval(() => guardedTick(pool, 'ownershipSweep', () => ownershipSweepTick(pool)), 10 * 60 * 1000),
     setInterval(() => guardedTick(pool, 'ownershipSweepAuditBlind', () => auditBlindOwnershipSweepTick(pool)), 5 * 60 * 1000),
     setInterval(() => guardedTick(pool, 'outboxSweep', () => outboxSweepTick(pool)), 60 * 1000),

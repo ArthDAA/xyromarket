@@ -37,8 +37,10 @@ export function buildAuthUrl() {
 }
 
 // Manage Roles (M15) + View Audit Log (M6/A22) + Send Messages, Manage Threads,
-// Create Private Threads, Send Messages in Threads (hub — cf. README §Configuration Discord).
-const BOT_INVITE_PERMISSIONS = '361045690496';
+// Create Private Threads, Send Messages in Threads (hub) + Create Instant Invite
+// (A34 — inviting a trial recipient who isn't yet a member of the target guild)
+// — cf. README §Configuration Discord.
+const BOT_INVITE_PERMISSIONS = '361045690497';
 
 /**
  * Discord invite URL for a specific guild, pre-selected and locked
@@ -50,7 +52,11 @@ const BOT_INVITE_PERMISSIONS = '361045690496';
 export function buildBotInviteUrl(guildId) {
   const url = new URL('https://discord.com/api/oauth2/authorize');
   url.searchParams.set('client_id', Config.discordClientId);
-  url.searchParams.set('scope', 'bot');
+  // `applications.commands` alongside `bot` — without it, Discord refuses any guild-scoped
+  // slash command registration on that guild (`PUT .../guilds/{id}/commands` -> 50001 Missing
+  // Access, cf. `bot/main.js:registerCommands`). Every guild invited before this fix is still
+  // missing it and needs a fresh invite (or a manual grant) to actually get `/signaler`.
+  url.searchParams.set('scope', 'bot applications.commands');
   url.searchParams.set('permissions', BOT_INVITE_PERMISSIONS);
   url.searchParams.set('guild_id', guildId);
   url.searchParams.set('disable_guild_select', 'true');

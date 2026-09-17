@@ -4,8 +4,23 @@ import { Config } from '../config/env.js';
 
 const { Pool } = pg;
 
-/** Pool sizing per process, per the architecture contract's global solution. */
-const POOL_SIZE_BY_PROCESS = { web: 10, bot: 5, jobs: 3, migrate: 1 };
+/**
+ * Pool sizing per process, per the architecture contract's global solution.
+ * `bot` raised from 5 to 10 (A34): every intent/event handler here opens its
+ * own nested `withTransaction` call(s) on top of the one `processRow`
+ * already holds open for the handler's full duration (bus handlers only
+ * ever receive `pool`, never the outbox-processing `tx` itself) — and a
+ * single cascading domain action can fire several handlers concurrently
+ * (`trial.expire`/`cancel`'s sibling cascade alone can publish multiple
+ * `event.transaction.updated` plus `intent.trial.revoke` near-simultaneously
+ * for one call). Reproduced live: 5 was enough to deadlock the pool outright
+ * (every connection either an outer transaction waiting on a nested call,
+ * or a nested call waiting for a connection none of the outer ones would
+ * release) on nothing more exotic than an ordinary trial expiry with one
+ * sibling — this was already a latent risk before A34, just never
+ * triggered by anything in the existing test suite.
+ */
+const POOL_SIZE_BY_PROCESS = { web: 10, bot: 10, jobs: 3, migrate: 1 };
 
 /** Postgres error codes this module reacts to directly. */
 export const PG_ERROR = {
