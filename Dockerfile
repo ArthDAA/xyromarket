@@ -18,4 +18,11 @@ COPY . .
 
 ENV NODE_ENV=production
 
-CMD ["sh", "-c", "npm run migrate && npm run web"]
+# `grant-admin.mjs` (E10 bootstrap) runs on every boot, not gated behind
+# blitz.cloud's "Start command" field — that field's effect couldn't be
+# confirmed working. Deliberately joined with `;`, not `&&`: the script
+# exits 1 whenever BOOTSTRAP_ADMIN_DISCORD_ID isn't set (the normal case,
+# once bootstrap is done and the variable removed), and that must never
+# stop `web` from starting. Idempotent either way — safe to leave in place
+# permanently rather than needing a follow-up revert.
+CMD ["sh", "-c", "npm run migrate && node scripts/grant-admin.mjs; npm run web"]
