@@ -49,6 +49,24 @@ body {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  /* Thin subtitle-style outline, inherited by every piece of text on the
+     site (not just headings) — each element keeps its own `color`, this
+     only adds the dark edge that keeps it readable over the wallpaper.
+     `-webkit-text-stroke` alone (no shadow on top of it): Chrome/Edge/
+     Safari/modern Firefox all honor it, and stacking the text-shadow
+     fallback unconditionally doubled the effect there, which is what
+     made small card text look blurry/mushy rather than just outlined. */
+  -webkit-text-stroke: 0.4px #000;
+}
+
+@supports not (-webkit-text-stroke: 1px #000) {
+  body {
+    text-shadow:
+      -0.4px -0.4px 0 #000,
+       0.4px -0.4px 0 #000,
+      -0.4px  0.4px 0 #000,
+       0.4px  0.4px 0 #000;
+  }
 }
 
 header {
@@ -225,21 +243,6 @@ h1, h2, h3 {
   color: #fff;
   font-weight: 800;
   line-height: 1.3;
-  /* Subtitle-style outline (white fill, black edge) — keeps headings legible
-     sitting directly on the wallpaper. `-webkit-text-stroke` gives a crisp
-     edge in Chrome/Safari/modern Firefox; the layered text-shadow is the
-     fallback for browsers without stroke support and thickens thin strokes
-     at small sizes. */
-  -webkit-text-stroke: 1.25px #000;
-  text-shadow:
-    -1.5px -1.5px 0 #000,
-     1.5px -1.5px 0 #000,
-    -1.5px  1.5px 0 #000,
-     1.5px  1.5px 0 #000,
-    -1.5px  0     0 #000,
-     1.5px  0     0 #000,
-     0     -1.5px 0 #000,
-     0      1.5px 0 #000;
 }
 
 h1 {
@@ -331,6 +334,8 @@ textarea {
   color: var(--text);
   font-family: inherit;
   font-size: 0.95rem;
+  -webkit-text-stroke: inherit;
+  text-shadow: inherit;
 }
 
 form.inline input,
@@ -368,6 +373,8 @@ input[type="submit"] {
   font-weight: 600;
   cursor: pointer;
   transition: background-color 0.12s ease;
+  -webkit-text-stroke: inherit;
+  text-shadow: inherit;
 }
 
 button:hover,
