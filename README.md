@@ -104,39 +104,30 @@ Les tests `test:db` partagent une base et doivent tourner en série (`--test-con
 
 (`domain/matching/ttc.test.js` a existé puis a été retiré avec le moteur TTC — cf. `docs/devnotes/1-CheckList.md` A19 : initier un échange est désormais une action manuelle, `engine.proposeDirectSwap`, plus de cycles n-aires à garantir.)
 
-## Déploiement (VPS By-Hoster, KVM)
+## Déploiement (blitz.cloud)
 
-Déploiement continu depuis GitHub (`main` → VPS) — le client n'a pas d'ordinateur, Arthus reste seul opérateur, donc un `git push` doit suffire à mettre à jour le site sans jamais avoir besoin de se reconnecter en SSH pour une mise à jour de routine. Tous les fichiers cités ci-dessous existent déjà dans le repo (`deploy/`, `.github/workflows/`, `.env.example`) ; cette section documente comment les activer sur un VPS et un dépôt GitHub réels — aucune de ces actions n'a pu être exécutée depuis cette session (pas d'accès VPS, pas de dépôt GitHub créé).
+**Décidé le 2026-09-20** : hébergement sur [blitz.cloud](https://blitz.cloud) plutôt qu'un VPS géré à la main — le client n'a pas d'ordinateur, Arthus reste seul opérateur, et un PaaS avec plan gratuit + déploiement automatique sur chaque push GitHub colle mieux à ça (et au budget zéro) qu'un VPS à administrer soi-même. Remplace le plan VPS/systemd/SSH précédent (`deploy/`, toujours dans le repo au cas où, mais plus le chemin actif).
 
-### Mise en place initiale (une seule fois)
+Le site est **trois process indépendants** (`web`, `bot`, `jobs` — cf. `## Stack`), donc **trois apps blitz.cloud séparées** pointant sur le même repo `ArthDAA/xyromarket` et la même image (`Dockerfile` à la racine) :
 
-1. Créer le dépôt sur GitHub, ajouter le remote et pousser :
-   ```bash
-   git remote add origin git@github.com:<compte>/<repo>.git
-   git push -u origin master:main
-   ```
-2. Provisionner le VPS (Node.js 20 LTS, PostgreSQL 16, git), créer un utilisateur dédié `xyro` (jamais `root`) :
-   ```bash
-   adduser --system --group --home /opt/xyro-market xyro
-   ```
-3. En tant que `xyro`, cloner le dépôt dans `/opt/xyro-market` (nécessite un accès du VPS au repo GitHub — clé de déploiement en lecture seule, générée sur le VPS et ajoutée dans GitHub > Settings > Deploy keys) puis `npm ci --omit=dev`.
-4. Copier `.env.example` vers `/opt/xyro-market/.env`, remplir les vraies valeurs (jamais committé — voir le fichier pour le détail de chaque clé). Configurer le rôle `xyro_app` en base comme décrit plus haut.
-5. `npm run migrate`.
-6. Installer les 3 services : `sudo cp deploy/systemd/xyro-*.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now xyro-web xyro-bot xyro-jobs`.
-7. Reverse proxy TLS devant `web` (Caddy recommandé pour la simplicité de configuration).
-8. Autoriser `xyro` à redémarrer les 3 services sans mot de passe (nécessaire à `deploy/deploy.sh`, appelé par CI) — `sudo visudo -f /etc/sudoers.d/xyro-deploy` :
-   ```
-   xyro ALL=(root) NOPASSWD: /bin/systemctl restart xyro-web, /bin/systemctl restart xyro-bot, /bin/systemctl restart xyro-jobs
-   ```
-9. Générer une paire de clés SSH dédiée au déploiement (`ssh-keygen -t ed25519 -f deploy_key -N ''`), ajouter la clé publique à `~xyro/.ssh/authorized_keys` sur le VPS, et dans GitHub > Settings > Secrets and variables > Actions, ajouter :
-   - `VPS_SSH_KEY` — la clé **privée**
-   - `VPS_HOST` — l'IP ou le nom d'hôte du VPS
-   - `VPS_USER` — `xyro`
-   - `VPS_PORT` — le port SSH (facultatif, 22 par défaut)
+| App | Adresse publique | "Runs in the background" | Start command |
+|---|---|---|---|
+| web | oui (`xyromarket.blitz.cloud` ou domaine perso) | non | vide (utilise le `CMD` du Dockerfile) |
+| bot | non | **oui** | `sh -c "npm run migrate && npm run bot"` |
+| jobs | non | **oui** | `sh -c "npm run migrate && npm run jobs"` |
+
+`npm run migrate` tourne avant chaque process (y compris redondant sur les 3) sans risque : il pose un verrou consultatif Postgres (`src/db/migrations/run.js`), donc si deux apps démarrent en même temps une seule applique réellement les migrations, les autres passent (`skipped: true`).
+
+### Points d'attention (non vérifiables depuis cette session — pas de compte blitz.cloud)
+
+- **Une seule base Postgres pour les 3 apps.** Le wizard propose d'en créer une par app ("We set one up and connect it for you") — pour `bot`/`jobs`, ne PAS laisser créer une nouvelle base : réutiliser le même `DATABASE_URL` que l'app `web` (copier la variable depuis les Settings de l'app web, ou lier la même ressource base de données aux trois apps si blitz.cloud le permet).
+- **Port d'écoute** : le process web lit `WEB_PORT` (défaut `3000`, `Config.webPort` dans `src/config/env.js`) et écoute sur `0.0.0.0`. Si blitz.cloud impose un `PORT` injecté par la plateforme plutôt que de lire une variable au nom libre, régler `WEB_PORT` sur cette même valeur dans les Settings de l'app web.
+- **TLS/domaine** : `PUBLIC_BASE_URL` doit être en `https://` (le process refuse de démarrer sinon, `src/config/env.js`) — vérifier que le sous-domaine `*.blitz.cloud` ou le domaine personnalisé (F7, onglet **Domains**) sert bien en HTTPS avant de renseigner cette variable.
+- Toutes les variables de `.env.example` sont à renseigner dans les Settings de **chacune** des 3 apps (mêmes valeurs partout, sauf si blitz.cloud permet de les partager entre apps d'un même projet).
 
 ### Après la mise en place
 
-Chaque `git push` sur `main` déclenche `.github/workflows/deploy.yml` : tests (`.github/workflows/ci.yml` en fait autant sur les PR), puis `deploy/deploy.sh` exécuté sur le VPS via SSH (`git pull`, `npm ci`, `npm run migrate`, redémarrage des 3 services). Un déploiement manuel reste possible : `ssh xyro@<vps> bash /opt/xyro-market/deploy/deploy.sh`, ou `workflow_dispatch` depuis l'onglet Actions de GitHub.
+Chaque `git push` sur `main` reconstruit et redéploie automatiquement les 3 apps (`.github/workflows/ci.yml` fait tourner lint + test + test:db en parallèle sur chaque push/PR — signal indépendant de blitz.cloud, pas un prérequis à son déploiement).
 
 ## À vérifier avant toute mise en ligne réelle
 
