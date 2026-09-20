@@ -153,6 +153,15 @@ function boot() {
   if (process.env.NODE_ENV !== 'production') {
     loadDotEnvInto(process.env);
   }
+  // Some PaaS providers inject a generic `PORT` rather than our own `WEB_PORT`
+  // name (blitz.cloud A41 — suspected cause of a deploy stuck forever on
+  // "Starting it up": the platform's readiness probe likely targets whatever
+  // port *it* expects the process to bind, never the hardcoded default 3000
+  // this app fell back to without it). Respected only when `WEB_PORT` isn't
+  // already set explicitly, so dev/VPS deployments are unaffected.
+  if (process.env.PORT && !process.env.WEB_PORT) {
+    process.env.WEB_PORT = process.env.PORT;
+  }
   try {
     return parseConfig(process.env);
   } catch (err) {
