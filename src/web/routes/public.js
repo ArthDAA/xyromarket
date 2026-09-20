@@ -6,9 +6,23 @@ import { usersRepo } from '../../db/repositories/usersRepo.js';
 import { guildsRepo } from '../../db/repositories/guildsRepo.js';
 import { listingsRepo } from '../../db/repositories/listingsRepo.js';
 import { listingQueueRepo } from '../../db/repositories/listingQueueRepo.js';
-import { layout, legalPage, escapeHtml } from '../render.js';
+import {
+  layout,
+  legalPage,
+  escapeHtml,
+  guildIconHtml,
+  userAvatarHtml,
+  listingCardHtml,
+  pillHtml,
+  verifiedBadgeHtml,
+  bannerImgHtml,
+  userBannerUrl,
+  starsHtml,
+  reviewHtml,
+} from '../render.js';
 import * as oauth from '../auth/oauth.js';
 import * as session from '../auth/session.js';
+import { attachAvgColors } from '../iconColor.js';
 
 const OAUTH_STATE_COOKIE = 'xm_oauth_state';
 
@@ -42,31 +56,33 @@ async function lookupMaps(tx, items) {
   const guildIds = [...new Set(items.map((l) => l.guildId))];
   const userIds = [...new Set(items.map((l) => l.userId))];
   const [guilds, users] = await Promise.all([guildsRepo.findByIds(tx, guildIds), usersRepo.findByIds(tx, userIds)]);
+  const guildsWithColor = await attachAvgColors(guilds);
   return {
-    guildById: new Map(guilds.map((g) => [g.id, g])),
+    guildById: new Map(guildsWithColor.map((g) => [g.id, g])),
     userById: new Map(users.map((u) => [u.id, u])),
   };
 }
 
-/** Shared `<ul>` markup for a page of public listings — used by both `/` (preview) and `/annonces` (full list/search results). */
+/** Shared `<ul class="cards">` grid for a page of public listings — used by both `/` (preview) and `/annonces` (full list/search results). */
 function listingsListHtml(items, { guildById, userById }) {
   if (items.length === 0) return '<p>Aucune annonce publiée pour l\'instant.</p>';
-  return `<ul>${items
-    .map((l) => {
-      const guild = guildById.get(l.guildId);
-      const owner = userById.get(l.userId);
-      return `<li><a href="/annonces/${l.id}">${escapeHtml(l.description.slice(0, 80))}</a> — ${escapeHtml(l.mode)}
- — ${escapeHtml(guild?.name || l.guildId)}${owner ? ` — par <a href="/u/${owner.id}">${escapeHtml(owner.username)}</a>` : ''}</li>`;
-    })
+  return `<ul class="cards">${items
+    .map((l) => listingCardHtml(l, { guild: guildById.get(l.guildId), owner: userById.get(l.userId) }))
     .join('')}</ul>`;
 }
 
 /** 404 with an actual explanation instead of a bare "404" — same shape as `renderFormError` in user.js. */
-function notFoundPage(reply, message) {
+function notFoundPage(reply, message, user) {
   return reply
     .code(404)
     .type('text/html')
-    .send(layout({ title: 'Introuvable', body: `<h1>Introuvable</h1><p>${escapeHtml(message)}</p><p><a href="/">Retour à l'accueil</a></p>` }));
+    .send(
+      layout({
+        title: 'Introuvable',
+        user,
+        body: `<h1>Introuvable</h1><p>${escapeHtml(message)}</p><p><a href="/">Retour à l'accueil</a></p>`,
+      }),
+    );
 }
 
 /**
@@ -75,10 +91,20 @@ function notFoundPage(reply, message) {
  * rather than leaking a partial view.
  */
 export default async function publicRoutes(app, { pool }) {
+  // Every route below wants `req.user` for the header's search bar / profile menu (A38)
+  // — most didn't previously authenticate at all. `tryAuth` never blocks, so scoping it
+  // here (this plugin's own encapsulated context, not main.js) doesn't touch `user.js`'s
+  // or `admin.js`'s routes, which already guarantee `req.user` via their own `requireAuth`.
+  app.addHook('preHandler', session.tryAuth(pool));
+
   for (const [path, title] of Object.entries(LEGAL_PAGES)) {
-    app.get(path, async (_req, reply) => {
-      reply.header('Cache-Control', 'public, max-age=3600');
-      reply.type('text/html').send(legalPage(title));
+    app.get(path, async (req, reply) => {
+      // Was `public, max-age=3600` — no longer safe now that the header (A38) varies by
+      // session: a shared/proxy cache serving one visitor's logged-in header to the next
+      // anonymous one would be a real leak, however unlikely on this app's current single-VPS
+      // deployment. The legal *content* itself is still static; only the caching directive changed.
+      reply.header('Cache-Control', 'private, max-age=0');
+      reply.type('text/html').send(legalPage(title, req.user));
     });
   }
 
@@ -133,7 +159,7 @@ export default async function publicRoutes(app, { pool }) {
       reply.redirect('/tableau-de-bord');
     } catch (err) {
       req.log.warn({ err }, 'oauth callback failed');
-      reply.code(400).type('text/html').send(layout({ title: 'Connexion échouée', body: '<h1>Connexion échouée</h1>' }));
+      reply.code(400).type('text/html').send(layout({ title: 'Connexion échouée', user: req.user, body: '<h1>Connexion échouée</h1>' }));
     }
   });
 
@@ -147,15 +173,7 @@ export default async function publicRoutes(app, { pool }) {
     reply.redirect('/');
   });
 
-  app.get('/', { preHandler: [session.tryAuth(pool)] }, async (req, reply) => {
-    const accountLine = req.user
-      ? `Connecté en tant que <strong>${escapeHtml(req.user.username)}</strong> ·
-         <a href="/tableau-de-bord">Mon tableau de bord</a> ·
-         <form method="POST" action="/auth/logout" style="display:inline">
-           <button type="submit">Se déconnecter</button>
-         </form>`
-      : `<a href="/auth/discord">Se connecter avec Discord</a>`;
-
+  app.get('/', async (req, reply) => {
     const { page, guildById, userById } = await withTransaction(pool, async (tx) => {
       const p = await listings.listPublic(tx, {}, {});
       return { page: p, ...(await lookupMaps(tx, p.items)) };
@@ -165,13 +183,9 @@ export default async function publicRoutes(app, { pool }) {
     reply.type('text/html').send(
       layout({
         title: 'Accueil',
+        user: req.user,
         body: `<h1>Xyro Market</h1>
-<p>Échangez ou donnez votre serveur Discord.</p>
-<form method="GET" action="/annonces">
-<label>Rechercher un utilisateur, un alias, un serveur ou un tag <input type="text" name="search"></label>
-<button type="submit">Chercher</button>
-</form>
-<p><a href="/annonces">Rechercher / filtrer les annonces</a> · ${accountLine}</p>
+<p>Échangez ou donnez votre serveur Discord. <a href="/annonces">Rechercher / filtrer les annonces</a></p>
 <h2>Annonces</h2>
 ${listingsListHtml(page.items, { guildById, userById })}
 ${page.cursor ? `<p><a href="/annonces?cursor=${encodeURIComponent(page.cursor)}">Voir plus</a></p>` : ''}`,
@@ -194,16 +208,14 @@ ${page.cursor ? `<p><a href="/annonces?cursor=${encodeURIComponent(page.cursor)}
       return reply.type('text/html').send(
         layout({
           title: 'Recherche',
+          user: req.user,
+          searchQuery: search.trim(),
           body: `<h1>Recherche : ${escapeHtml(search.trim())}</h1>
-<form method="GET" action="/annonces">
-<input type="text" name="search" value="${escapeHtml(search.trim())}">
-<button type="submit">Chercher</button>
-</form>
 <h2>Utilisateurs (${userHits.length})</h2>
 ${
   userHits.length === 0
     ? '<p>Aucun.</p>'
-    : `<ul>${userHits.map((u) => `<li><a href="/u/${u.id}">${escapeHtml(u.username)}</a>${u.isVerified ? ' ✓ Vérifié' : ''}</li>`).join('')}</ul>`
+    : `<ul>${userHits.map((u) => `<li>${userAvatarHtml(u)}<a href="/u/${u.id}">${escapeHtml(u.username)}</a>${u.isVerified ? ` ${verifiedBadgeHtml()}` : ''}</li>`).join('')}</ul>`
 }
 <h2>Annonces (${hits.length})</h2>
 ${listingsListHtml(hits, { guildById, userById })}`,
@@ -224,11 +236,8 @@ ${listingsListHtml(hits, { guildById, userById })}`,
     reply.type('text/html').send(
       layout({
         title: 'Annonces',
+        user: req.user,
         body: `<h1>Annonces</h1>
-<form method="GET" action="/annonces">
-<label>Rechercher un utilisateur, un alias, un serveur ou un tag <input type="text" name="search"></label>
-<button type="submit">Chercher</button>
-</form>
 ${listingsListHtml(page.items, { guildById, userById })}
 ${page.cursor ? `<p><a href="/annonces?cursor=${encodeURIComponent(page.cursor)}">Suivant</a></p>` : ''}`,
       }),
@@ -242,7 +251,7 @@ ${page.cursor ? `<p><a href="/annonces?cursor=${encodeURIComponent(page.cursor)}
    * find a compatible listing yourself via `/annonces?mode=echange&tags=...`) — the
    * bot opens a private hub thread only once the two sides are actually matched.
    */
-  app.get('/annonces/:id', { preHandler: [session.tryAuth(pool)] }, async (req, reply) => {
+  app.get('/annonces/:id', async (req, reply) => {
     const result = await withTransaction(pool, async (tx) => {
       const listing = await listingsRepo.findById(tx, req.params.id);
       if (!listing || listing.status === 'hidden' || listing.status === 'removed') return null;
@@ -265,7 +274,7 @@ ${page.cursor ? `<p><a href="/annonces?cursor=${encodeURIComponent(page.cursor)}
       return { listing, guild, owner, isOwner, alreadyQueued, myEchangeListings };
     });
     if (!result) {
-      return notFoundPage(reply, 'Cette annonce n\'existe pas, ou a été retirée par son propriétaire.');
+      return notFoundPage(reply, 'Cette annonce n\'existe pas, ou a été retirée par son propriétaire.', req.user);
     }
     const { listing, guild, owner, isOwner, alreadyQueued, myEchangeListings } = result;
 
@@ -307,12 +316,13 @@ ${myEchangeListings.map((l) => `<option value="${escapeHtml(l.id)}">${escapeHtml
     reply.header('Cache-Control', 'private, max-age=0');
     reply.type('text/html').send(
       layout({
-        title: 'Annonce',
-        body: `<h1>${escapeHtml(listing.mode)}</h1>
-<p>Serveur : ${escapeHtml(guild?.name || listing.guildId)}${owner ? ` — publiée par <a href="/u/${owner.id}">${escapeHtml(owner.username)}</a>` : ''}</p>
+        title: guild?.name || 'Annonce',
+        user: req.user,
+        body: `<h1>${guildIconHtml(guild)}${escapeHtml(guild?.name || listing.guildId)}</h1>
+<p><span class="pill">${listing.mode === 'don' ? 'Don' : 'Échange'}</span>${owner ? ` publiée par ${userAvatarHtml(owner)}<a href="/u/${owner.id}">${escapeHtml(owner.username)}</a>` : ''}</p>
 <p>${escapeHtml(listing.description)}</p>
-<p>Tags : ${listing.tags.map(escapeHtml).join(', ')}</p>
-${listing.mode === 'echange' ? `<p>Recherché : ${listing.seekingTags.map(escapeHtml).join(', ')}</p>` : ''}
+<p>${listing.tags.map(pillHtml).join('')}</p>
+${listing.mode === 'echange' ? `<p><strong>Recherché :</strong> ${listing.seekingTags.map(pillHtml).join('')}</p>` : ''}
 <p>Taille de la communauté (informatif) : ${guild?.memberCountCached ?? 'inconnue'}</p>
 ${contactSection}`,
       }),
@@ -323,30 +333,54 @@ ${contactSection}`,
     const result = await withTransaction(pool, async (tx) => {
       const user = await usersRepo.findById(tx, req.params.id);
       if (!user || user.deletedAt) return null;
-      const [aggregate, activeListings] = await Promise.all([
+      const [aggregate, activeListings, reviewPage] = await Promise.all([
         reputation.aggregate(tx, user.id),
         listingsRepo.listByUser(tx, user.id, { status: 'active', limit: 50 }),
+        reputation.history(tx, user.id, { limit: 10 }),
       ]);
       const guilds = await guildsRepo.findByIds(tx, [...new Set(activeListings.items.map((l) => l.guildId))]);
-      return { user, aggregate, listings: activeListings.items, guildById: new Map(guilds.map((g) => [g.id, g])) };
+      const guildsWithColor = await attachAvgColors(guilds);
+      const authors = await usersRepo.findByIds(tx, [...new Set(reviewPage.items.map((r) => r.authorId))]);
+      return {
+        user,
+        aggregate,
+        listings: activeListings.items,
+        guildById: new Map(guildsWithColor.map((g) => [g.id, g])),
+        reviews: reviewPage.items,
+        authorById: new Map(authors.map((a) => [a.id, a])),
+      };
     });
     if (!result) {
-      return notFoundPage(reply, 'Ce profil n\'existe pas, ou son compte a été supprimé.');
+      return notFoundPage(reply, 'Ce profil n\'existe pas, ou son compte a été supprimé.', req.user);
     }
-    const { user, aggregate, listings, guildById } = result;
+    const { user, aggregate, listings, guildById, reviews, authorById } = result;
     reply.type('text/html').send(
       layout({
         title: user.username,
-        // No raw discord_id on a public profile — internal id only.
-        body: `<h1>${escapeHtml(user.username)}${user.isVerified ? ' ✓ Vérifié' : ''}</h1>
-<p>Avis : ${aggregate.count} (moyenne ${aggregate.average ?? 'N/A'})</p>
+        user: req.user, // the visitor's own session (header nav) — distinct from the `user` being viewed below
+        // No raw discord_id shown as text on a public profile — userAvatarHtml/userBannerUrl only
+        // ever use it inside a CDN image URL, structurally required, never as visible text.
+        body: `<div class="profile-header">
+<div class="profile-banner">${bannerImgHtml(userBannerUrl(user, 600))}</div>
+<div class="profile-identity">
+${userAvatarHtml(user, { requestSize: 256 })}
+<h1>${escapeHtml(user.username)}${user.isVerified ? ` ${verifiedBadgeHtml()}` : ''}</h1>
+</div>
+<div class="profile-body">
+<p>${starsHtml(Math.round(aggregate.average ?? 0))} ${aggregate.count} avis${aggregate.average != null ? ` (moyenne ${aggregate.average.toFixed(1)}/5)` : ''}</p>
+</div>
+</div>
 <h2>Serveurs (${listings.length})</h2>
 ${
   listings.length === 0
     ? '<p>Aucune annonce active pour l\'instant.</p>'
-    : `<ul>${listings
-        .map((l) => `<li><a href="/annonces/${l.id}">${escapeHtml(guildById.get(l.guildId)?.name || l.guildId)}</a> — ${escapeHtml(l.mode)}</li>`)
-        .join('')}</ul>`
+    : `<ul class="cards">${listings.map((l) => listingCardHtml(l, { guild: guildById.get(l.guildId) })).join('')}</ul>`
+}
+<h2>Avis (${aggregate.count})</h2>
+${
+  reviews.length === 0
+    ? '<p>Aucun avis pour l\'instant.</p>'
+    : `<ul>${reviews.map((r) => reviewHtml(r, authorById.get(r.authorId))).join('')}</ul>`
 }`,
       }),
     );

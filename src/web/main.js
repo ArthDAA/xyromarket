@@ -38,7 +38,10 @@ async function main() {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'"], // no unsafe-inline — this app never emits an inline <script>
         styleSrc: ["'self'"],
-        imgSrc: ["'self'", 'https://cdn.discordapp.com'],
+        // 'data:' is scoped to img-src only (never script-src) — needed for the flat-color
+        // banner fallback (A36, `render.js:solidColorImgHtml`), a same-origin-computed SVG,
+        // not third-party content; still no inline <script>/<style> anywhere in this app.
+        imgSrc: ["'self'", 'https://cdn.discordapp.com', 'data:'],
         objectSrc: ["'none'"],
       },
     },

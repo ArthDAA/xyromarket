@@ -144,11 +144,13 @@ export async function handleCallback(tx, { code, state, expectedState }) {
     discordId: me.id,
     username: me.username,
     avatarHash: me.avatar,
+    bannerHash: me.banner,
   });
 
   const ownedGuilds = guilds.filter((g) => g.owner === true);
   for (const g of ownedGuilds) {
     await guildsRepo.ensureExists(tx, { id: g.id, name: g.name, ownerDiscordId: me.id });
+    await guildsRepo.updatePresence(tx, g.id, { name: g.name, iconHash: g.icon });
     await ownership.observe(tx, {
       guildId: g.id,
       ownerDiscordId: me.id,
@@ -213,6 +215,7 @@ export async function syncOwnedGuilds(tx, userId) {
   const observedAt = new Date();
   for (const g of ownedGuilds) {
     await guildsRepo.ensureExists(tx, { id: g.id, name: g.name, ownerDiscordId: user.discordId });
+    await guildsRepo.updatePresence(tx, g.id, { name: g.name, iconHash: g.icon });
     await ownership.observe(tx, {
       guildId: g.id,
       ownerDiscordId: user.discordId,

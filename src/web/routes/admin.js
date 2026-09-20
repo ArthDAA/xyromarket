@@ -64,18 +64,20 @@ function wantsJson(req) {
   return Boolean(req.headers.accept?.includes('application/json'));
 }
 
-function adminLayout({ title, body }) {
+function adminLayout({ title, body, user }) {
   return layout({
     title: `Admin — ${title}`,
+    user,
     noindex: true,
     body: `<p><a href="/admin">← Panel admin</a></p>${body}`,
   });
 }
 
-function renderFormError(reply, message, status = 422) {
+function renderFormError(reply, message, status = 422, user) {
   return reply.code(status).type('text/html').send(
     adminLayout({
       title: 'Erreur',
+      user,
       body: `<h1>Une erreur est survenue</h1><p>${escapeHtml(message)}</p>`,
     }),
   );
@@ -89,14 +91,14 @@ function withAccept(handler) {
       if (err instanceof z.ZodError) {
         const message = err.issues.map((i) => i.message).join(' — ');
         if (wantsJson(req)) return reply.code(422).send({ error: 'ERR_VALIDATION', issues: err.issues });
-        return renderFormError(reply, message);
+        return renderFormError(reply, message, 422, req.user);
       }
       const correlationId = randomUUID();
       const mapped = mapDomainError(err, correlationId);
       if (mapped.status === 500) req.log.error({ err, correlationId }, 'unexpected admin error');
       if (wantsJson(req)) return reply.code(mapped.status).send(mapped.body);
       const message = ADMIN_ERROR_MESSAGES[err?.code] ?? `${err?.code ?? 'ERR_UNEXPECTED'} — ${err?.message ?? ''}`;
-      return renderFormError(reply, message, mapped.status);
+      return renderFormError(reply, message, mapped.status, req.user);
     }
   };
 }
@@ -162,7 +164,7 @@ export default async function adminRoutes(app, { pool }) {
     ].filter(([perm]) => caps.has(perm));
 
     reply.type('text/html').send(
-      adminLayout({
+      adminLayout({ user: req.user,
         title: 'Panel admin',
         body: `<h1>Panel admin</h1>
 <form method="GET" action="/admin/search">
@@ -212,7 +214,7 @@ ${openReports !== null ? `<p><strong>${openReports}</strong> signalement(s) ouve
     });
 
     reply.type('text/html').send(
-      adminLayout({
+      adminLayout({ user: req.user,
         title: `Recherche — ${term}`,
         body: `<h1>Recherche : ${escapeHtml(term)}</h1>
 <form method="GET" action="/admin/search">
@@ -263,7 +265,7 @@ ${
     });
     if (!data) {
       if (wantsJson(req)) return reply.code(404).send({ error: 'NOT_FOUND' });
-      return reply.code(404).type('text/html').send(adminLayout({ title: 'Introuvable', body: '<h1>404</h1><p>Utilisateur introuvable.</p>' }));
+      return reply.code(404).type('text/html').send(adminLayout({ user: req.user, title: 'Introuvable', body: '<h1>404</h1><p>Utilisateur introuvable.</p>' }));
     }
     if (wantsJson(req)) return reply.send({ user: data.user });
 
@@ -272,7 +274,7 @@ ${
     const activeSanctions = sanctions.items.filter((s) => !s.revokedAt && (!s.endsAt || new Date(s.endsAt) > new Date()));
 
     reply.type('text/html').send(
-      adminLayout({
+      adminLayout({ user: req.user,
         title: user.username,
         body: `<h1>${escapeHtml(user.username)}</h1>
 <p>Discord ID : ${escapeHtml(user.discordId)} · Vérifié : ${user.isVerified ? 'oui' : 'non'} · Banni définitivement : ${user.bannedPermanently ? 'oui' : 'non'}${user.bannedUntil ? ` · Banni jusqu'au ${escapeHtml(new Date(user.bannedUntil).toLocaleString('fr-FR'))}` : ''}</p>
@@ -284,7 +286,7 @@ ${
     : `<ul>${activeSanctions
         .map(
           (s) => `<li>${escapeHtml(SANCTION_LABELS[s.kind] ?? s.kind)} — ${escapeHtml(s.reason)}${s.endsAt ? ` (jusqu'au ${escapeHtml(new Date(s.endsAt).toLocaleString('fr-FR'))})` : ''}
-<form method="POST" action="/admin/sanctions/${s.id}/lift" style="display:inline">
+<form method="POST" action="/admin/sanctions/${s.id}/lift" class="inline">
 ${csrfField(csrfToken)}
 <input type="text" name="reason" placeholder="Motif de la levée" required>
 <button type="submit">Lever</button>
@@ -307,7 +309,7 @@ ${Object.entries(SANCTION_LABELS).map(([k, label]) => `<option value="${k}">${es
 ${
   sanctions.items.length === 0
     ? '<p>Aucune.</p>'
-    : `<table border="1" cellpadding="4"><tr><th>Type</th><th>Motif</th><th>Depuis</th><th>Fin</th><th>Levée</th></tr>
+    : `<table><tr><th>Type</th><th>Motif</th><th>Depuis</th><th>Fin</th><th>Levée</th></tr>
 ${sanctions.items
   .map(
     (s) => `<tr><td>${escapeHtml(SANCTION_LABELS[s.kind] ?? s.kind)}</td><td>${escapeHtml(s.reason)}</td><td>${escapeHtml(new Date(s.startsAt).toLocaleString('fr-FR'))}</td><td>${s.endsAt ? escapeHtml(new Date(s.endsAt).toLocaleString('fr-FR')) : '—'}</td><td>${s.revokedAt ? escapeHtml(new Date(s.revokedAt).toLocaleString('fr-FR')) : '—'}</td></tr>`,
@@ -319,7 +321,7 @@ ${sanctions.items
 <ul>${roleKeys
   .map(
     (key) => `<li>${escapeHtml(allRoles.find((r) => r.key === key)?.label ?? key)}
-<form method="POST" action="/admin/users/${user.id}/roles/${encodeURIComponent(key)}/retirer" style="display:inline">
+<form method="POST" action="/admin/users/${user.id}/roles/${encodeURIComponent(key)}/retirer" class="inline">
 ${csrfField(csrfToken)}
 <button type="submit">Retirer</button>
 </form></li>`,
@@ -338,7 +340,7 @@ ${allRoles.filter((r) => !roleKeys.includes(r.key)).map((r) => `<option value="$
 <ul>${directGrants
   .map(
     (key) => `<li>${escapeHtml(allPermissions.find((p) => p.key === key)?.label ?? key)}
-<form method="POST" action="/admin/users/${user.id}/permissions/${encodeURIComponent(key)}/retirer" style="display:inline">
+<form method="POST" action="/admin/users/${user.id}/permissions/${encodeURIComponent(key)}/retirer" class="inline">
 ${csrfField(csrfToken)}
 <button type="submit">Retirer</button>
 </form></li>`,
@@ -407,7 +409,7 @@ ${allPermissions.map((p) => `<option value="${escapeHtml(p.key)}">${escapeHtml(p
     const statuses = ['active', 'pending_bot', 'matched', 'fulfilled', 'hidden', 'removed'];
 
     reply.type('text/html').send(
-      adminLayout({
+      adminLayout({ user: req.user,
         title: 'Annonces',
         body: `<h1>Annonces (${page.total})</h1>
 ${guildId ? `<p>Filtré sur la guilde ${escapeHtml(guildId)} — <a href="/admin/listings">retirer ce filtre</a></p>` : ''}
@@ -419,15 +421,15 @@ ${statuses.map((s) => `<option value="${s}"${req.query.status === s ? ' selected
 </select></label>
 <button type="submit">Filtrer</button>
 </form>
-<table border="1" cellpadding="4"><tr><th>Description</th><th>Mode</th><th>Statut</th><th>Propriétaire</th><th>Action</th></tr>
+<table><tr><th>Description</th><th>Mode</th><th>Statut</th><th>Propriétaire</th><th>Action</th></tr>
 ${page.items
   .map(
     (l) => `<tr><td>${escapeHtml(l.description.slice(0, 60))}</td><td>${escapeHtml(l.mode)}</td><td>${escapeHtml(l.status)}</td><td><a href="/admin/users/${l.userId}">${escapeHtml(l.userId)}</a></td><td>
 ${
   l.status === 'hidden'
-    ? `<form method="POST" action="/admin/listings/${l.id}/restore" style="display:inline">${csrfField(csrfToken)}<button type="submit">Restaurer</button></form>`
+    ? `<form method="POST" action="/admin/listings/${l.id}/restore" class="inline">${csrfField(csrfToken)}<button type="submit">Restaurer</button></form>`
     : l.status === 'active' || l.status === 'pending_bot'
-      ? `<form method="POST" action="/admin/listings/${l.id}/hide" style="display:inline">${csrfField(csrfToken)}<button type="submit">Masquer</button></form>`
+      ? `<form method="POST" action="/admin/listings/${l.id}/hide" class="inline">${csrfField(csrfToken)}<button type="submit">Masquer</button></form>`
       : '—'
 }
 </td></tr>`,
@@ -460,7 +462,7 @@ ${paginationLinks('/admin/listings', { status: req.query.status, guildId }, page
     const csrfToken = issueCsrfToken(req.csrfSecret);
 
     reply.type('text/html').send(
-      adminLayout({
+      adminLayout({ user: req.user,
         title: 'Signalements',
         body: `<h1>Signalements (${page.total})</h1>
 <form method="GET" action="/admin/reports">
@@ -474,16 +476,16 @@ ${page.items
   .map(
     (r) => `<div><p><strong>${escapeHtml(REPORT_STATUS_LABELS[r.status] ?? r.status)}</strong> — ${escapeHtml(r.reason)} — cible : ${targetLink(r.targetType, r.targetId)} (${escapeHtml(r.targetType)})</p>
 <p>${escapeHtml(r.body ?? '')}</p>
-<form method="POST" action="/admin/reports/${r.id}/assign" style="display:inline">
+<form method="POST" action="/admin/reports/${r.id}/assign" class="inline">
 ${csrfField(csrfToken)}
 <input type="text" name="assigneeId" placeholder="UUID de l'assigné" required>
 <button type="submit">Assigner</button>
 </form>
-<form method="POST" action="/admin/reports/${r.id}/resolve" style="display:inline">
+<form method="POST" action="/admin/reports/${r.id}/resolve" class="inline">
 ${csrfField(csrfToken)}
 <button type="submit">Résoudre</button>
 </form>
-<form method="POST" action="/admin/reports/${r.id}/notes" style="display:inline">
+<form method="POST" action="/admin/reports/${r.id}/notes" class="inline">
 ${csrfField(csrfToken)}
 <input type="text" name="body" placeholder="Note interne" required>
 <button type="submit">Ajouter une note</button>
@@ -522,7 +524,7 @@ ${paginationLinks('/admin/reports', { status: req.query.status }, page.cursor)}`
     const csrfToken = issueCsrfToken(req.csrfSecret);
 
     reply.type('text/html').send(
-      adminLayout({
+      adminLayout({ user: req.user,
         title: 'Avis reçus',
         body: `<h1>Avis reçus par <a href="/admin/users/${escapeHtml(req.params.userId)}">${escapeHtml(req.params.userId)}</a> (${page.total})</h1>
 ${page.items
@@ -561,16 +563,16 @@ ${paginationLinks(`/admin/reviews/${req.params.userId}`, {}, page.cursor)}`,
     if (wantsJson(req)) return reply.send({ roles, permissions });
 
     reply.type('text/html').send(
-      adminLayout({
+      adminLayout({ user: req.user,
         title: 'Rôles et permissions',
         body: `<h1>Rôles et permissions</h1>
 <p>Pour attribuer un rôle ou une permission à quelqu'un, passe par sa fiche utilisateur (<code>/admin/users/:id</code>).</p>
 <h2>Rôles</h2>
-<table border="1" cellpadding="4"><tr><th>Clé</th><th>Libellé</th><th>Révocable</th></tr>
+<table><tr><th>Clé</th><th>Libellé</th><th>Révocable</th></tr>
 ${roles.map((r) => `<tr><td>${escapeHtml(r.key)}</td><td>${escapeHtml(r.label)}</td><td>${r.revocable ? 'oui' : 'non'}</td></tr>`).join('')}
 </table>
 <h2>Permissions</h2>
-<table border="1" cellpadding="4"><tr><th>Clé</th><th>Libellé</th></tr>
+<table><tr><th>Clé</th><th>Libellé</th></tr>
 ${permissions.map((p) => `<tr><td>${escapeHtml(p.key)}</td><td>${escapeHtml(p.label)}</td></tr>`).join('')}
 </table>`,
       }),
@@ -606,7 +608,7 @@ ${permissions.map((p) => `<tr><td>${escapeHtml(p.key)}</td><td>${escapeHtml(p.la
     const statuses = ['PROPOSED', 'ACCEPTED', 'TRIAL', 'TRIAL_VALIDATED', 'TRANSFERRED', 'DISPUTED', 'CANCELLED', 'EXPIRED', 'CLOSED'];
 
     reply.type('text/html').send(
-      adminLayout({
+      adminLayout({ user: req.user,
         title: 'Transactions',
         body: `<h1>Transactions (${page.total})</h1>
 ${guildId ? `<p>Filtré sur la guilde ${escapeHtml(guildId)} — <a href="/admin/transactions">retirer ce filtre</a></p>` : ''}
@@ -618,7 +620,7 @@ ${statuses.map((s) => `<option value="${s}"${req.query.status === s ? ' selected
 </select></label>
 <button type="submit">Filtrer</button>
 </form>
-<table border="1" cellpadding="4"><tr><th>Guilde</th><th>De</th><th>Vers</th><th>Statut</th><th></th></tr>
+<table><tr><th>Guilde</th><th>De</th><th>Vers</th><th>Statut</th><th></th></tr>
 ${page.items
   .map(
     (t) => `<tr><td>${escapeHtml(t.guildId)}</td><td><a href="/admin/users/${t.fromUserId}">${escapeHtml(t.fromUserId)}</a></td><td><a href="/admin/users/${t.toUserId}">${escapeHtml(t.toUserId)}</a></td><td>${escapeHtml(t.status)}</td><td><a href="/admin/transactions/${t.id}">Détail</a></td></tr>`,
@@ -639,7 +641,7 @@ ${paginationLinks('/admin/transactions', { status: req.query.status, guildId }, 
     });
     if (!data) {
       if (wantsJson(req)) return reply.code(404).send({ error: 'NOT_FOUND' });
-      return reply.code(404).type('text/html').send(adminLayout({ title: 'Introuvable', body: '<h1>404</h1><p>Transaction introuvable.</p>' }));
+      return reply.code(404).type('text/html').send(adminLayout({ user: req.user, title: 'Introuvable', body: '<h1>404</h1><p>Transaction introuvable.</p>' }));
     }
     if (wantsJson(req)) return reply.send({ transaction: data.transaction });
 
@@ -647,7 +649,7 @@ ${paginationLinks('/admin/transactions', { status: req.query.status, guildId }, 
     const csrfToken = issueCsrfToken(req.csrfSecret);
 
     reply.type('text/html').send(
-      adminLayout({
+      adminLayout({ user: req.user,
         title: 'Transaction',
         body: `<h1>Transaction ${escapeHtml(t.id)}</h1>
 <p>Statut : <strong>${escapeHtml(t.status)}</strong> · Guilde : ${escapeHtml(t.guildId)}</p>
@@ -692,7 +694,7 @@ ${csrfField(csrfToken)}
     const csrfToken = issueCsrfToken(req.csrfSecret);
 
     reply.type('text/html').send(
-      adminLayout({
+      adminLayout({ user: req.user,
         title: 'Réglages',
         body: `<h1>Réglages du site</h1>
 ${settingsList
@@ -742,7 +744,7 @@ ${csrfField(csrfToken)}
   // --- Statistiques ---
   app.get('/admin/stats', { preHandler: guard('stats.read') }, withAccept(async (req, reply) => {
     reply.type('text/html').send(
-      adminLayout({
+      adminLayout({ user: req.user,
         title: 'Statistiques',
         body: `<h1>Statistiques</h1>
 <ul>${stats.METRIC_KEYS.map((m) => `<li><a href="/admin/stats/${m}">${escapeHtml(m)}</a></li>`).join('')}</ul>`,
@@ -758,14 +760,14 @@ ${csrfField(csrfToken)}
 
     const rows = result.items ?? result.points;
     reply.type('text/html').send(
-      adminLayout({
+      adminLayout({ user: req.user,
         title: req.params.metric,
         body: `<h1>${escapeHtml(req.params.metric)}</h1>
 <p>${result.computedAt ? `Calculé le ${escapeHtml(new Date(result.computedAt).toLocaleString('fr-FR'))}` : 'Jamais encore calculé'}${result.stale ? ' — <strong>périmé</strong> (en attente du prochain rafraîchissement par le process `jobs`)' : ''}</p>
 ${
   rows.length === 0
     ? '<p>Aucune donnée.</p>'
-    : `<table border="1" cellpadding="4">
+    : `<table>
 ${rows.map((r) => `<tr>${Object.entries(r).map(([k, v]) => `<td>${escapeHtml(k)}: ${escapeHtml(typeof v === 'object' ? JSON.stringify(v) : String(v))}</td>`).join('')}</tr>`).join('')}
 </table>`
 }`,
@@ -785,7 +787,7 @@ ${rows.map((r) => `<tr>${Object.entries(r).map(([k, v]) => `<td>${escapeHtml(k)}
     if (wantsJson(req)) return reply.send(page);
 
     reply.type('text/html').send(
-      adminLayout({
+      adminLayout({ user: req.user,
         title: 'Journal d\'audit',
         body: `<h1>Journal d'audit (${page.total})</h1>
 <form method="GET" action="/admin/audit">
@@ -794,7 +796,7 @@ ${rows.map((r) => `<tr>${Object.entries(r).map(([k, v]) => `<td>${escapeHtml(k)}
 <label>Type de cible <input type="text" name="targetType" value="${escapeHtml(req.query.targetType ?? '')}"></label>
 <button type="submit">Filtrer</button>
 </form>
-<table border="1" cellpadding="4"><tr><th>Date</th><th>Acteur</th><th>Action</th><th>Cible</th><th>Avant</th><th>Après</th></tr>
+<table><tr><th>Date</th><th>Acteur</th><th>Action</th><th>Cible</th><th>Avant</th><th>Après</th></tr>
 ${page.items
   .map(
     (e) => `<tr><td>${escapeHtml(new Date(e.at).toLocaleString('fr-FR'))}</td><td>${targetLink('user', e.actorId)}</td><td>${escapeHtml(e.action)}</td><td>${targetLink(e.targetType, e.targetId)}</td><td><pre>${escapeHtml(JSON.stringify(e.before))}</pre></td><td><pre>${escapeHtml(JSON.stringify(e.after))}</pre></td></tr>`,

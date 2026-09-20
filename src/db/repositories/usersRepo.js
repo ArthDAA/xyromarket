@@ -30,15 +30,15 @@ export const usersRepo = {
   },
 
   /** Upserts the user seen at OAuth login, keyed by their stable Discord id. */
-  async upsertFromOAuth(tx, { discordId, username, avatarHash }) {
+  async upsertFromOAuth(tx, { discordId, username, avatarHash, bannerHash }) {
     try {
       const { rows } = await tx.query(
-        `INSERT INTO users (discord_id, username, avatar_hash)
-         VALUES ($1, $2, $3)
+        `INSERT INTO users (discord_id, username, avatar_hash, banner_hash)
+         VALUES ($1, $2, $3, $4)
          ON CONFLICT (discord_id)
-         DO UPDATE SET username = EXCLUDED.username, avatar_hash = EXCLUDED.avatar_hash
+         DO UPDATE SET username = EXCLUDED.username, avatar_hash = EXCLUDED.avatar_hash, banner_hash = EXCLUDED.banner_hash
          RETURNING *`,
-        [discordId, username, avatarHash],
+        [discordId, username, avatarHash, bannerHash],
       );
       return mapRow(rows[0]);
     } catch (err) {

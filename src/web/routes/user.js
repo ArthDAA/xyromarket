@@ -3,7 +3,16 @@ import { randomUUID } from 'node:crypto';
 import { withTransaction } from '../../db/pool.js';
 import { requireAuth, requireCsrf, issueCsrfToken } from '../auth/session.js';
 import { mapDomainError } from '../errorMapping.js';
-import { layout, escapeHtml } from '../render.js';
+import {
+  layout,
+  escapeHtml,
+  userAvatarHtml,
+  cardHtml,
+  bannerImgHtml,
+  userBannerUrl,
+  verifiedBadgeHtml,
+  starsHtml,
+} from '../render.js';
 import * as listings from '../../domain/listings.js';
 import * as ownership from '../../domain/ownership.js';
 import * as queue from '../../domain/matching/queue.js';
@@ -22,6 +31,7 @@ import { settingsRepo } from '../../db/repositories/settingsRepo.js';
 import { usersRepo } from '../../db/repositories/usersRepo.js';
 import { disputesRepo } from '../../db/repositories/disputesRepo.js';
 import { reviewsRepo } from '../../db/repositories/reviewsRepo.js';
+import { attachAvgColors } from '../iconColor.js';
 
 const lastGuildSyncAt = new Map(); // userId -> ms epoch, in-process rate limit (1/min)
 
@@ -103,7 +113,7 @@ function withAccept(handler) {
     } catch (err) {
       if (err instanceof z.ZodError) {
         if (isFormSubmission(req)) {
-          return renderFormError(reply, err.issues.map((i) => i.message).join(' — '));
+          return renderFormError(reply, err.issues.map((i) => i.message).join(' — '), 422, req.user);
         }
         return reply.code(422).send({ error: 'ERR_VALIDATION', issues: err.issues });
       }
@@ -114,7 +124,7 @@ function withAccept(handler) {
       }
       if (isFormSubmission(req)) {
         const message = FORM_ERROR_MESSAGES[err.code] ?? `${err.code ?? 'ERR_UNEXPECTED'} — ${err.message ?? ''}`;
-        return renderFormError(reply, message, mapped.status);
+        return renderFormError(reply, message, mapped.status, req.user);
       }
       return reply.code(mapped.status).send(mapped.body);
     }
@@ -126,7 +136,7 @@ function isFormSubmission(req) {
   return Boolean(req.headers['content-type']?.includes('application/x-www-form-urlencoded'));
 }
 
-function renderFormError(reply, message, status = 422) {
+function renderFormError(reply, message, status = 422, user) {
   // No `javascript:` back-link: CSP's script-src ('self' only, no unsafe-inline) blocks it anyway.
   return reply
     .code(status)
@@ -134,6 +144,7 @@ function renderFormError(reply, message, status = 422) {
     .send(
       layout({
         title: 'Erreur',
+        user,
         body: `<h1>Une erreur est survenue</h1><p>${escapeHtml(message)}</p><p><a href="/tableau-de-bord">Retour au tableau de bord</a></p>`,
       }),
     );
@@ -183,16 +194,20 @@ export default async function userRoutes(app, { pool }) {
 
   /** Authenticated home: own listings, owned Discord guilds, entry point to create a listing. */
   app.get('/tableau-de-bord', { preHandler: [auth] }, withAccept(async (req, reply) => {
-    const [guilds, myListings, hubInviteUrl, myTransactions] = await Promise.all([
+    const [guilds, myListings, hubInviteUrl, myTransactions, fullUser, aggregate] = await Promise.all([
       ownedGuilds(req.user.id, req.user.discordId),
       withTransaction(pool, (tx) => listingsRepo.listByUser(tx, req.user.id, { limit: 50 })),
       withTransaction(pool, (tx) => settingsRepo.get(tx, 'hub_invite_url')),
       withTransaction(pool, (tx) => transactionsRepo.listByUser(tx, req.user.id, { limit: 50 })),
+      withTransaction(pool, (tx) => usersRepo.findById(tx, req.user.id)),
+      withTransaction(pool, (tx) => reputation.aggregate(tx, req.user.id)),
     ]);
 
+    const guildsWithColor = await attachAvgColors(guilds);
     const liveByGuild = liveListingsByGuild(myListings.items);
-    const unpublished = guilds.filter((g) => liveByGuild.get(g.id)?.status !== 'active');
-    const guildNameById = new Map(guilds.map((g) => [g.id, g.name || g.id]));
+    const unpublished = guildsWithColor.filter((g) => liveByGuild.get(g.id)?.status !== 'active');
+    const guildNameById = new Map(guildsWithColor.map((g) => [g.id, g.name || g.id]));
+    const guildById = new Map(guildsWithColor.map((g) => [g.id, g]));
     const csrfToken = issueCsrfToken(req.csrfSecret);
 
     // Only the non-terminal ones: this is where a party goes to act (valider/annuler), not a full history.
@@ -205,7 +220,8 @@ export default async function userRoutes(app, { pool }) {
           usersRepo.findById(tx, otherPartyId),
           guildsRepo.findById(tx, t.guildId),
         ]);
-        out.push({ transaction: t, otherParty, guild });
+        const [guildWithColor] = guild ? await attachAvgColors([guild]) : [guild];
+        out.push({ transaction: t, otherParty, guild: guildWithColor });
       }
       return out;
     });
@@ -213,12 +229,22 @@ export default async function userRoutes(app, { pool }) {
     reply.type('text/html').send(
       layout({
         title: 'Tableau de bord',
+        user: req.user,
         noindex: true,
-        body: `<h1>Bonjour ${escapeHtml(req.user.username)}</h1>
+        body: `<div class="profile-header">
+<div class="profile-banner">${bannerImgHtml(userBannerUrl(fullUser, 600))}</div>
+<div class="profile-identity">
+${userAvatarHtml(fullUser, { requestSize: 256 })}
+<h1>${escapeHtml(fullUser.username)}${fullUser.isVerified ? ` ${verifiedBadgeHtml()}` : ''}</h1>
+</div>
+<div class="profile-body">
+<p>${starsHtml(Math.round(aggregate.average ?? 0))} ${aggregate.count} avis${aggregate.average != null ? ` (moyenne ${aggregate.average.toFixed(1)}/5)` : ''} · <a href="/u/${fullUser.id}">Voir mon profil public</a></p>
+</div>
+</div>
 <p><a href="/annonces/nouvelle">Créer une annonce</a> · <a href="/matchs">Mes propositions</a> · <a href="/me/export">Exporter mes données</a>${
   req.caps.size > 0 ? ' · <a href="/admin">Panel admin</a>' : ''
 } ·
-<form method="POST" action="/auth/logout" style="display:inline"><button type="submit">Se déconnecter</button></form></p>
+<form method="POST" action="/auth/logout" class="inline"><button type="submit">Se déconnecter</button></form></p>
 ${
   hubInviteUrl
     ? `<p><strong>Rejoins le serveur hub Discord</strong> pour pouvoir discuter dès qu'une mise en contact a lieu : <a href="${escapeHtml(hubInviteUrl)}">${escapeHtml(hubInviteUrl)}</a></p>`
@@ -228,10 +254,15 @@ ${
 ${
   ongoingDetails.length === 0
     ? '<p>Aucun échange en cours.</p>'
-    : `<ul>${ongoingDetails
-        .map(
-          ({ transaction: t, otherParty, guild }) =>
-            `<li>${escapeHtml(guild?.name || t.guildId)} — avec ${escapeHtml(otherParty?.username ?? 'utilisateur supprimé')} — <a href="/transactions/${t.id}">${escapeHtml(TRANSACTION_STATUS_LABELS[t.status] ?? t.status)}</a></li>`,
+    : `<ul class="cards">${ongoingDetails
+        .map(({ transaction: t, otherParty, guild }) =>
+          cardHtml({
+            guild,
+            titleHtml: escapeHtml(guild?.name || t.guildId),
+            bodyHtml: `<p class="card-desc">avec ${otherParty ? userAvatarHtml(otherParty) : ''}${escapeHtml(otherParty?.username ?? 'utilisateur supprimé')}</p>`,
+            footerHtml: escapeHtml(TRANSACTION_STATUS_LABELS[t.status] ?? t.status),
+            href: `/transactions/${t.id}`,
+          }),
         )
         .join('')}</ul>`
 }
@@ -242,14 +273,20 @@ ${
 ${
   unpublished.length === 0
     ? '<p>Chacun de tes serveurs a déjà une annonce publiée.</p>'
-    : `<ul>${unpublished
+    : `<ul class="cards">${unpublished
         .map((g) => {
           const live = liveByGuild.get(g.id);
-          if (live?.status === 'pending_bot') {
-            return `<li>${escapeHtml(g.name || g.id)} (${escapeHtml(g.id)}) — <strong>annonce en attente</strong> :
-<a href="${escapeHtml(oauth.buildBotInviteUrl(g.id))}">compléter l'invitation du bot</a></li>`;
-          }
-          return `<li>${escapeHtml(g.name || g.id)} (${escapeHtml(g.id)}) — <a href="/annonces/nouvelle">créer une annonce</a></li>`;
+          const pending = live?.status === 'pending_bot';
+          const href = pending ? oauth.buildBotInviteUrl(g.id) : '/annonces/nouvelle';
+          return cardHtml({
+            guild: g,
+            titleHtml: escapeHtml(g.name || g.id),
+            bodyHtml: `<p class="card-desc">${escapeHtml(g.id)}</p>`,
+            footerHtml: pending
+              ? `<strong>Annonce en attente</strong> — <a href="${escapeHtml(href)}">compléter l'invitation du bot</a>`
+              : `<a href="${href}">Créer une annonce</a>`,
+            href,
+          });
         })
         .join('')}</ul>`
 }`
@@ -258,18 +295,23 @@ ${
 ${
   myListings.items.length === 0
     ? '<p>Aucune annonce pour l\'instant.</p>'
-    : `<ul>${myListings.items
-        .map(
-          (l) =>
-            `<li>${escapeHtml(guildNameById.get(l.guildId) ?? l.guildId)} — <a href="/annonces/${l.id}">${escapeHtml(l.description.slice(0, 60))}</a> — ${escapeHtml(l.mode)} — ${escapeHtml(l.status)}${
-              EDITABLE_STATUSES.has(l.status) ? ` — <a href="/annonces/${l.id}/modifier">Modifier</a>` : ''
+    : `<ul class="cards">${myListings.items
+        .map((l) =>
+          cardHtml({
+            guild: guildById.get(l.guildId),
+            titleHtml: escapeHtml(guildNameById.get(l.guildId) ?? l.guildId),
+            bodyHtml: `<p class="card-desc">${escapeHtml(l.description)}</p>`,
+            href: `/annonces/${l.id}`,
+            footerHtml: `<span><span class="dot dot-${l.mode}"></span>${escapeHtml(l.status)}</span>${
+              EDITABLE_STATUSES.has(l.status) ? ` <a href="/annonces/${l.id}/modifier">Modifier</a>` : ''
             }${
               REMOVABLE_STATUSES.has(l.status)
-                ? ` — <form method="POST" action="/annonces/${l.id}/supprimer" style="display:inline">
+                ? ` <form method="POST" action="/annonces/${l.id}/supprimer" class="inline">
 <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">
 <button type="submit">Supprimer</button></form>`
                 : ''
-            }</li>`,
+            }`,
+          }),
         )
         .join('')}</ul>`
 }`,
@@ -292,6 +334,7 @@ ${
     reply.type('text/html').send(
       layout({
         title: 'Nouvelle annonce',
+        user: req.user,
         noindex: true,
         body: `<h1>Créer une annonce</h1>
 ${guilds.length === 0 ? '<p>Aucun serveur disponible — chaque serveur dont tu es propriétaire a déjà une annonce active ou en attente. Reviens une fois propriétaire d\'un nouveau serveur Discord.</p>' : ''}
@@ -341,6 +384,7 @@ ${guilds.map((g) => `<option value="${escapeHtml(g.id)}">${escapeHtml(g.name || 
     reply.type('text/html').send(
       layout({
         title: 'Modifier l\'annonce',
+        user: req.user,
         noindex: true,
         body: `<h1>Modifier l'annonce</h1>
 <p>Mode : ${escapeHtml(listing.mode)} (non modifiable — retire l'annonce depuis le <a href="/tableau-de-bord">tableau de bord</a> et recrée-la pour changer de mode)</p>
@@ -471,6 +515,7 @@ ${
     reply.type('text/html').send(
       layout({
         title: 'Mes propositions',
+        user: req.user,
         noindex: true,
         body: `<h1>Mes propositions</h1>
 ${
@@ -496,11 +541,11 @@ ${
 ${
   mine?.acceptedAt
     ? ''
-    : `<form method="POST" action="/matchs/${proposal.id}/accepter" style="display:inline">
+    : `<form method="POST" action="/matchs/${proposal.id}/accepter" class="inline">
 <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">
 <button type="submit">Accepter</button>
 </form>
-<form method="POST" action="/matchs/${proposal.id}/refuser" style="display:inline">
+<form method="POST" action="/matchs/${proposal.id}/refuser" class="inline">
 <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">
 <button type="submit">Refuser</button>
 </form>`
@@ -548,7 +593,11 @@ ${
     });
     if (!data) {
       return reply.code(404).type('text/html').send(
-        layout({ title: 'Introuvable', body: '<h1>404</h1><p><a href="/tableau-de-bord">Retour au tableau de bord</a></p>' }),
+        layout({
+          title: 'Introuvable',
+          user: req.user,
+          body: '<h1>404</h1><p><a href="/tableau-de-bord">Retour au tableau de bord</a></p>',
+        }),
       );
     }
     const { transaction: t, otherParty, guild, myReview, openDispute } = data;
@@ -560,6 +609,7 @@ ${
     reply.type('text/html').send(
       layout({
         title: 'Transaction',
+        user: req.user,
         noindex: true,
         body: `<h1>${escapeHtml(guild?.name || t.guildId)}</h1>
 <p>Avec : ${escapeHtml(otherParty?.username ?? 'utilisateur supprimé')} · Statut : <strong>${escapeHtml(TRANSACTION_STATUS_LABELS[t.status] ?? t.status)}</strong></p>
@@ -571,7 +621,7 @@ ${
 }
 ${
   t.status === 'TRIAL' && !myValidated
-    ? `<form method="POST" action="/transactions/${t.id}/valider" style="display:inline">
+    ? `<form method="POST" action="/transactions/${t.id}/valider" class="inline">
 <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">
 <button type="submit">Valider le transfert</button>
 </form> `
@@ -579,7 +629,7 @@ ${
 }
 ${
   CANCELLABLE_TRANSACTION_STATUSES.has(t.status)
-    ? `<form method="POST" action="/transactions/${t.id}/annuler" style="display:inline">
+    ? `<form method="POST" action="/transactions/${t.id}/annuler" class="inline">
 <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">
 <button type="submit">Annuler l'échange</button>
 </form>`

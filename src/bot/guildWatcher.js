@@ -51,6 +51,9 @@ async function observeAndUpsert(pool, guild, { botPresent = true } = {}) {
     });
     await guildsRepo.updatePresence(tx, guild.id, {
       name: guild.name,
+      iconHash: guild.icon,
+      bannerHash: guild.banner,
+      splashHash: guild.splash,
       memberCountCached: guild.memberCount,
       botPresent,
       auditBlind: !hasAuditLogPerm,
@@ -74,6 +77,9 @@ export async function onGuildUpdate(pool, oldGuild, newGuild) {
   await withTransaction(pool, async (tx) => {
     await guildsRepo.updatePresence(tx, newGuild.id, {
       name: newGuild.name,
+      iconHash: newGuild.icon,
+      bannerHash: newGuild.banner,
+      splashHash: newGuild.splash,
       memberCountCached: newGuild.memberCount,
     });
     if (oldGuild.ownerId !== newGuild.ownerId) {

@@ -80,6 +80,7 @@ export function requireAuth(pool) {
       discordId: result.user.discordId,
       username: result.user.username,
       isVerified: result.user.isVerified,
+      avatarHash: result.user.avatarHash,
       sanctions: result.activeSanctions,
     };
     req.caps = result.caps;
@@ -113,6 +114,7 @@ export function tryAuth(pool) {
         discordId: result.user.discordId,
         username: result.user.username,
         isVerified: result.user.isVerified,
+        avatarHash: result.user.avatarHash,
       };
       // Lets a public-but-adaptive page (e.g. a listing's "je suis intéressé" form)
       // issue a CSRF-protected POST for a logged-in visitor without forcing the

@@ -65,6 +65,7 @@ export async function rectify(tx, userId, patch) {
     discordId: user.discordId,
     username: patch.username ?? user.username,
     avatarHash: patch.avatarHash ?? user.avatarHash,
+    bannerHash: patch.bannerHash ?? user.bannerHash,
   });
   await audit.record(tx, {
     actorId: userId,
