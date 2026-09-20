@@ -36,11 +36,17 @@ html {
 
 body {
   margin: 0;
-  background: var(--bg);
+  background-color: var(--bg);
+  background-image: url('/static/wallpaper.svg');
+  background-size: cover;
+  background-position: center top;
+  background-attachment: fixed;
+  background-repeat: no-repeat;
   color: var(--text);
   font-family: var(--font);
   font-size: 16px;
   line-height: 1.55;
+  min-height: 100vh;
 }
 
 header {
@@ -56,6 +62,9 @@ header {
 }
 
 header .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
   flex-shrink: 0;
   color: var(--text-bright);
   font-weight: 700;
@@ -64,15 +73,12 @@ header .brand {
   letter-spacing: 0.01em;
 }
 
-header .brand::before {
-  content: "";
-  display: inline-block;
-  width: 22px;
-  height: 22px;
-  margin-right: 0.5rem;
-  vertical-align: -5px;
+header .brand img {
+  width: 34px;
+  height: 34px;
+  margin: 0;
   border-radius: 8px;
-  background: var(--banner);
+  background: none;
 }
 
 .discord-join {

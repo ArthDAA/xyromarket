@@ -1,0 +1,154 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="2560" viewBox="0 0 1440 2560">
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#030108"/>
+    <stop offset=".32" stop-color="#090315"/>
+    <stop offset=".62" stop-color="#120523"/>
+    <stop offset="1" stop-color="#020107"/>
+  </linearGradient>
+
+  <radialGradient id="nebula" cx="50%" cy="42%" r="70%">
+    <stop offset="0" stop-color="#6C2BCE" stop-opacity=".22"/>
+    <stop offset=".38" stop-color="#35126F" stop-opacity=".14"/>
+    <stop offset=".72" stop-color="#130522" stop-opacity=".06"/>
+    <stop offset="1" stop-color="#000" stop-opacity="0"/>
+  </radialGradient>
+
+  <linearGradient id="violetRibbon" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#2B0870"/>
+    <stop offset=".22" stop-color="#7130D8"/>
+    <stop offset=".5" stop-color="#A45BFF"/>
+    <stop offset=".73" stop-color="#6423C7"/>
+    <stop offset="1" stop-color="#1B084C"/>
+  </linearGradient>
+
+  <linearGradient id="violetDeep" x1="0" y1="1" x2="1" y2="0">
+    <stop offset="0" stop-color="#17053E"/>
+    <stop offset=".4" stop-color="#4D18AA"/>
+    <stop offset=".72" stop-color="#8B3EFF"/>
+    <stop offset="1" stop-color="#250765"/>
+  </linearGradient>
+
+  <linearGradient id="orangeRibbon" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#FF4B00"/>
+    <stop offset=".24" stop-color="#FF7A00"/>
+    <stop offset=".48" stop-color="#FFAA27"/>
+    <stop offset=".7" stop-color="#FF6200"/>
+    <stop offset="1" stop-color="#A72522"/>
+  </linearGradient>
+
+  <linearGradient id="orangeGlass" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0" stop-color="#FF8A00" stop-opacity=".15"/>
+    <stop offset=".35" stop-color="#FF6A00" stop-opacity=".65"/>
+    <stop offset=".55" stop-color="#FFB52E" stop-opacity=".5"/>
+    <stop offset="1" stop-color="#D43A17" stop-opacity=".12"/>
+  </linearGradient>
+
+  <filter id="blur30" x="-40%" y="-40%" width="180%" height="180%">
+    <feGaussianBlur stdDeviation="30"/>
+  </filter>
+  <filter id="blur14" x="-30%" y="-30%" width="160%" height="160%">
+    <feGaussianBlur stdDeviation="14"/>
+  </filter>
+  <filter id="blur6" x="-20%" y="-20%" width="140%" height="140%">
+    <feGaussianBlur stdDeviation="6"/>
+  </filter>
+  <filter id="softGlow" x="-35%" y="-35%" width="170%" height="170%">
+    <feGaussianBlur stdDeviation="10" result="b"/>
+    <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+
+  <pattern id="grain" width="80" height="80" patternUnits="userSpaceOnUse">
+    <circle cx="8" cy="14" r="1" fill="#fff" opacity=".025"/>
+    <circle cx="51" cy="37" r=".8" fill="#fff" opacity=".018"/>
+    <circle cx="27" cy="69" r=".7" fill="#fff" opacity=".022"/>
+  </pattern>
+</defs>
+
+<!-- Deep Discord-like atmosphere -->
+<rect width="1440" height="2560" fill="url(#bg)"/>
+<rect width="1440" height="2560" fill="url(#nebula)"/>
+
+<!-- distant violet atmospheric waves -->
+<g opacity=".28" filter="url(#blur30)">
+  <path d="M-180 350 C180 90 470 120 720 350 C970 580 1160 590 1650 270
+           L1650 470 C1190 760 950 750 675 510 C410 280 150 300 -180 590Z" fill="#6425D5"/>
+  <path d="M-150 1260 C180 1010 460 1080 700 1320 C930 1540 1180 1530 1600 1210
+           L1600 1430 C1170 1710 900 1690 650 1460 C410 1240 160 1230 -150 1510Z" fill="#4A18B4"/>
+  <path d="M-120 2130 C190 1900 470 1960 720 2180 C980 2410 1190 2380 1580 2100
+           L1580 2330 C1170 2600 900 2570 650 2350 C390 2130 140 2140 -120 2400Z" fill="#5C20C9"/>
+</g>
+
+<!-- main violet ribbons -->
+<g>
+  <path d="M-170 270 C110 60 390 80 650 300 C900 515 1110 555 1600 230
+           L1600 430 C1120 750 875 720 610 505 C355 295 105 300 -170 560Z"
+        fill="url(#violetRibbon)" opacity=".82"/>
+  <path d="M-170 640 C100 430 380 465 625 700 C865 930 1110 945 1600 610
+           L1600 805 C1110 1125 850 1115 590 875 C350 655 95 650 -170 900Z"
+        fill="url(#violetDeep)" opacity=".72"/>
+  <path d="M-170 1010 C115 790 390 835 645 1070 C895 1300 1125 1290 1600 970
+           L1600 1170 C1120 1470 850 1490 600 1250 C350 1010 100 1020 -170 1280Z"
+        fill="url(#violetRibbon)" opacity=".77"/>
+  <path d="M-170 1410 C120 1170 400 1225 650 1460 C900 1690 1140 1695 1600 1370
+           L1600 1580 C1120 1880 860 1870 600 1635 C350 1410 95 1420 -170 1680Z"
+        fill="url(#violetDeep)" opacity=".8"/>
+  <path d="M-170 1820 C100 1600 395 1650 645 1880 C900 2110 1140 2100 1600 1780
+           L1600 1990 C1110 2290 850 2285 600 2050 C350 1820 100 1830 -170 2090Z"
+        fill="url(#violetRibbon)" opacity=".72"/>
+  <path d="M-170 2230 C120 2010 405 2060 660 2290 C910 2510 1135 2515 1600 2190
+           L1600 2400 C1130 2690 850 2680 600 2450 C350 2220 100 2240 -170 2490Z"
+        fill="url(#violetDeep)" opacity=".76"/>
+</g>
+
+<!-- translucent orange ribbons weaving through -->
+<g>
+  <path d="M-180 470 C100 260 300 305 510 500 C720 695 900 675 1610 210
+           L1610 385 C925 875 700 865 470 645 C270 455 90 450 -180 650Z"
+        fill="url(#orangeRibbon)" opacity=".9" filter="url(#softGlow)"/>
+  <path d="M-180 875 C90 675 305 705 515 900 C735 1100 920 1090 1600 655
+           L1600 820 C930 1285 700 1250 465 1035 C270 855 80 865 -180 1050Z"
+        fill="url(#orangeGlass)" opacity=".82"/>
+  <path d="M-180 1260 C100 1060 300 1100 520 1300 C735 1495 930 1490 1610 1050
+           L1610 1230 C920 1680 700 1660 470 1445 C270 1260 80 1265 -180 1450Z"
+        fill="url(#orangeRibbon)" opacity=".88" filter="url(#softGlow)"/>
+  <path d="M-180 1665 C90 1470 305 1505 520 1700 C750 1910 935 1895 1610 1460
+           L1610 1635 C930 2100 690 2060 460 1850 C260 1665 80 1680 -180 1855Z"
+        fill="url(#orangeGlass)" opacity=".78"/>
+  <path d="M-180 2070 C100 1860 310 1900 530 2100 C745 2300 930 2290 1610 1840
+           L1610 2020 C930 2485 690 2460 465 2240 C270 2055 80 2080 -180 2260Z"
+        fill="url(#orangeRibbon)" opacity=".86" filter="url(#softGlow)"/>
+</g>
+
+<!-- fine ethereal contour lines -->
+<g fill="none" stroke-linecap="round">
+  <path d="M-80 335 C170 145 390 155 620 345 C860 545 1080 555 1510 300" stroke="#B06CFF" stroke-width="3" opacity=".55"/>
+  <path d="M-70 355 C175 170 395 180 615 365 C850 565 1080 575 1510 325" stroke="#6F2BFF" stroke-width="2" opacity=".38"/>
+  <path d="M-80 735 C150 555 380 575 600 785 C840 1010 1080 1015 1510 700" stroke="#A765FF" stroke-width="3" opacity=".42"/>
+  <path d="M-80 1105 C170 915 395 935 620 1140 C850 1350 1080 1360 1510 1060" stroke="#B16BFF" stroke-width="3" opacity=".5"/>
+  <path d="M-70 1505 C165 1300 390 1330 615 1535 C850 1750 1080 1750 1510 1450" stroke="#8F4AFF" stroke-width="3" opacity=".45"/>
+  <path d="M-70 1910 C165 1700 395 1730 620 1940 C850 2150 1080 2150 1510 1850" stroke="#B26AFF" stroke-width="3" opacity=".42"/>
+  <path d="M-70 2310 C160 2105 390 2135 625 2340 C850 2540 1080 2545 1510 2240" stroke="#8E42FF" stroke-width="3" opacity=".46"/>
+
+  <path d="M-50 510 C170 350 315 375 510 535" stroke="#FFD08A" stroke-width="3" opacity=".7" filter="url(#blur6)"/>
+  <path d="M670 690 C910 735 1120 600 1490 360" stroke="#FF9B28" stroke-width="4" opacity=".7" filter="url(#blur6)"/>
+  <path d="M-40 1300 C180 1140 320 1160 505 1325" stroke="#FFCB72" stroke-width="3" opacity=".55"/>
+  <path d="M700 1500 C930 1530 1130 1370 1500 1130" stroke="#FF8A19" stroke-width="4" opacity=".62" filter="url(#blur6)"/>
+  <path d="M-40 2110 C175 1940 330 1970 520 2135" stroke="#FFD17D" stroke-width="3" opacity=".55"/>
+</g>
+
+<!-- tiny floating luminous particles -->
+<g fill="#FFB347">
+  <circle cx="210" cy="420" r="3" opacity=".75"/>
+  <circle cx="1090" cy="510" r="2.5" opacity=".55"/>
+  <circle cx="360" cy="930" r="2" opacity=".5"/>
+  <circle cx="1220" cy="1210" r="3" opacity=".6"/>
+  <circle cx="190" cy="1580" r="2.5" opacity=".5"/>
+  <circle cx="1010" cy="1770" r="2" opacity=".6"/>
+  <circle cx="300" cy="2220" r="3" opacity=".55"/>
+  <circle cx="1260" cy="2320" r="2.5" opacity=".5"/>
+</g>
+
+<!-- subtle grain-like vector texture -->
+<rect width="1440" height="2560" fill="url(#grain)" opacity=".7"/>
+</svg>

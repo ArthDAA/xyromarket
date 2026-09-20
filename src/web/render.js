@@ -268,11 +268,12 @@ export function layout({ title, body, user, caps, searchQuery, noindex = false }
 <meta name="viewport" content="width=device-width, initial-scale=1">
 ${noindex ? '<meta name="robots" content="noindex">' : ''}
 <title>${escapeHtml(title)} · Xyro Market</title>
+<link rel="icon" type="image/png" href="/static/favicon.png">
 <link rel="stylesheet" href="/static/style.css?v=${STYLE_VERSION}">
 </head>
 <body>
 <header>
-<a href="/" class="brand">Xyro Market</a>
+<a href="/" class="brand"><img src="/static/logo.png" alt="">Xyro Market</a>
 ${discordJoinButtonHtml()}
 <form method="GET" action="/annonces" class="header-search">
 <input type="search" name="search" value="${escapeHtml(searchQuery ?? '')}" placeholder="Rechercher..." aria-label="Rechercher un utilisateur, un serveur ou un tag">
