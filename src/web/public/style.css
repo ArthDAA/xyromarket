@@ -47,6 +47,8 @@ body {
   font-size: 16px;
   line-height: 1.55;
   min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
 header {
@@ -212,8 +214,11 @@ header .brand img {
 
 main {
   max-width: 1080px;
+  width: 100%;
   margin: 0 auto;
   padding: 2rem 1.5rem 3rem;
+  box-sizing: border-box;
+  flex: 1 0 auto;
 }
 
 h1, h2, h3 {
@@ -768,15 +773,26 @@ tr:hover td {
 /* Footer */
 
 footer {
+  flex: 0 0 auto;
+  height: 84px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   border-top: 1px solid var(--border);
-  padding: 1.5rem;
+  padding: 0 1.5rem;
   text-align: center;
   color: var(--text-muted);
   font-size: 0.8rem;
 }
 
 footer nav {
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
+footer p {
+  margin: 0;
 }
 
 footer nav a {
