@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { getCachedHubInviteUrl } from './hubInvite.js';
 
 /**
  * `/static/*` is served with `immutable, max-age=30d` (`web/main.js`) — fine
@@ -97,12 +98,32 @@ export function solidColorImgHtml(hex) {
   return `<img class="banner-img" src="data:image/svg+xml,${encodeURIComponent(svg)}" alt="">`;
 }
 
-/** `<img>` for a guild icon, or a one-letter colored fallback (`.icon-fallback`, styled in `style.css`) when the guild has none. `requestSize` is the CDN fetch size — bump it for a context that displays the icon larger than the default 32px inline slot (CSS does the actual display sizing; this only controls source resolution). */
+/**
+ * Every guild without an icon/banner/splash was rendering the exact same
+ * flat blurple — a wall of identical cards. `guildHueClass` picks one of 8
+ * curated gradients deterministically from `guild.id` (a stable hash, not
+ * random — the same guild always gets the same hue, across requests and
+ * processes), applied to both the banner placeholder and the letter
+ * fallback so a card's two placeholder pieces stay visually coordinated.
+ * Scoped to guild cards only (not user profiles) — that's what was asked.
+ */
+const HUE_COUNT = 8;
+
+function guildHueClass(guild) {
+  const key = guild?.id ?? '';
+  let hash = 0;
+  for (let i = 0; i < key.length; i += 1) {
+    hash = (hash * 31 + key.charCodeAt(i)) | 0;
+  }
+  return `hue-${Math.abs(hash) % HUE_COUNT}`;
+}
+
+/** `<img>` for a guild icon, or a one-letter fallback (`.icon-fallback`, styled in `style.css`, tinted via `guildHueClass`) when the guild has none. `requestSize` is the CDN fetch size — bump it for a context that displays the icon larger than the default 32px inline slot (CSS does the actual display sizing; this only controls source resolution). */
 export function guildIconHtml(guild, { requestSize = 64 } = {}) {
   const url = guildIconUrl(guild, requestSize);
   if (url) return `<img src="${url}" alt="" width="32" height="32">`;
   const letter = escapeHtml((guild?.name || '?').trim().charAt(0).toUpperCase() || '?');
-  return `<span class="icon-fallback">${letter}</span>`;
+  return `<span class="icon-fallback ${guildHueClass(guild)}">${letter}</span>`;
 }
 
 /** `<img>` for a user avatar — `userAvatarUrl` always resolves, so this never needs a fallback branch. See `guildIconHtml` for `requestSize`. */
@@ -136,7 +157,8 @@ export const MODE_LABELS = { don: 'Don', echange: 'Échange' };
  */
 export function cardHtml({ guild, titleHtml, bodyHtml = '', footerHtml = '', href, requestSize = 128 }) {
   const bannerContent = bannerImgHtml(guildBannerUrl(guild, 480)) || solidColorImgHtml(guild?.avgColorHex);
-  const top = `<div class="card-banner">${bannerContent}</div>
+  const bannerHueClass = bannerContent ? '' : ` ${guildHueClass(guild)}`;
+  const top = `<div class="card-banner${bannerHueClass}">${bannerContent}</div>
 <div class="card-icon">${guildIconHtml(guild, { requestSize })}</div>
 <div class="card-body">
 <p class="card-title">${titleHtml}</p>
@@ -194,6 +216,17 @@ const LEGAL_LINKS = [
   ['/retractation', 'Droit de rétractation'],
 ];
 
+/** The Discord "Clyde" glyph, inline (not an `<img>`) — no CSP concern either way, but an inline SVG needs no `img-src` allowance and can inherit `currentColor`. */
+const DISCORD_ICON_SVG =
+  '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.522 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></svg>';
+
+/** Header button to the hub server's permanent invite (`settings.hub_invite_url`, cf. `hubInvite.js`) — `''` while the cache hasn't warmed up yet (a few seconds after boot at most) rather than a dead link. */
+function discordJoinButtonHtml() {
+  const url = getCachedHubInviteUrl();
+  if (!url) return '';
+  return `<a class="discord-join" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" title="Rejoindre le serveur Discord" aria-label="Rejoindre le serveur Discord">${DISCORD_ICON_SVG}</a>`;
+}
+
 /**
  * Right side of the header: a login link, or — logged in — an avatar button
  * that looks like it opens the profile but actually opens a `<details>`
@@ -235,6 +268,7 @@ ${noindex ? '<meta name="robots" content="noindex">' : ''}
 <body>
 <header>
 <a href="/" class="brand">Xyro Market</a>
+${discordJoinButtonHtml()}
 <form method="GET" action="/annonces" class="header-search">
 <input type="search" name="search" value="${escapeHtml(searchQuery ?? '')}" placeholder="Rechercher..." aria-label="Rechercher un utilisateur, un serveur ou un tag">
 <button type="submit">Chercher</button>

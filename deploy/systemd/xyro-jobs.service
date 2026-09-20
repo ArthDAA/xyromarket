@@ -1,0 +1,18 @@
+[Unit]
+Description=Xyro Market - jobs
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=xyro
+Group=xyro
+WorkingDirectory=/opt/xyro-market
+EnvironmentFile=/opt/xyro-market/.env
+ExecStart=/usr/bin/node src/jobs/main.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

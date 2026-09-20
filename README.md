@@ -106,33 +106,37 @@ Les tests `test:db` partagent une base et doivent tourner en série (`--test-con
 
 ## Déploiement (VPS By-Hoster, KVM)
 
-1. Provisionner le VPS, installer Node.js 20 LTS, PostgreSQL, git.
-2. Cloner le repo, `npm ci --omit=dev`.
-3. `.env` de production avec les secrets réels (jamais committé).
-4. `npm run migrate`, puis configurer le rôle `xyro_app` comme décrit ci-dessus.
-5. Un service systemd par process (`web`, `bot`, `jobs`). Exemple pour `web` :
+Déploiement continu depuis GitHub (`main` → VPS) — le client n'a pas d'ordinateur, Arthus reste seul opérateur, donc un `git push` doit suffire à mettre à jour le site sans jamais avoir besoin de se reconnecter en SSH pour une mise à jour de routine. Tous les fichiers cités ci-dessous existent déjà dans le repo (`deploy/`, `.github/workflows/`, `.env.example`) ; cette section documente comment les activer sur un VPS et un dépôt GitHub réels — aucune de ces actions n'a pu être exécutée depuis cette session (pas d'accès VPS, pas de dépôt GitHub créé).
 
-```ini
-# /etc/systemd/system/xyro-web.service
-[Unit]
-Description=Xyro Market - web
-After=network.target postgresql.service
+### Mise en place initiale (une seule fois)
 
-[Service]
-Type=simple
-WorkingDirectory=/opt/xyro-market
-EnvironmentFile=/opt/xyro-market/.env
-ExecStart=/usr/bin/node src/web/main.js
-Restart=on-failure
-RestartSec=5
+1. Créer le dépôt sur GitHub, ajouter le remote et pousser :
+   ```bash
+   git remote add origin git@github.com:<compte>/<repo>.git
+   git push -u origin master:main
+   ```
+2. Provisionner le VPS (Node.js 20 LTS, PostgreSQL 16, git), créer un utilisateur dédié `xyro` (jamais `root`) :
+   ```bash
+   adduser --system --group --home /opt/xyro-market xyro
+   ```
+3. En tant que `xyro`, cloner le dépôt dans `/opt/xyro-market` (nécessite un accès du VPS au repo GitHub — clé de déploiement en lecture seule, générée sur le VPS et ajoutée dans GitHub > Settings > Deploy keys) puis `npm ci --omit=dev`.
+4. Copier `.env.example` vers `/opt/xyro-market/.env`, remplir les vraies valeurs (jamais committé — voir le fichier pour le détail de chaque clé). Configurer le rôle `xyro_app` en base comme décrit plus haut.
+5. `npm run migrate`.
+6. Installer les 3 services : `sudo cp deploy/systemd/xyro-*.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now xyro-web xyro-bot xyro-jobs`.
+7. Reverse proxy TLS devant `web` (Caddy recommandé pour la simplicité de configuration).
+8. Autoriser `xyro` à redémarrer les 3 services sans mot de passe (nécessaire à `deploy/deploy.sh`, appelé par CI) — `sudo visudo -f /etc/sudoers.d/xyro-deploy` :
+   ```
+   xyro ALL=(root) NOPASSWD: /bin/systemctl restart xyro-web, /bin/systemctl restart xyro-bot, /bin/systemctl restart xyro-jobs
+   ```
+9. Générer une paire de clés SSH dédiée au déploiement (`ssh-keygen -t ed25519 -f deploy_key -N ''`), ajouter la clé publique à `~xyro/.ssh/authorized_keys` sur le VPS, et dans GitHub > Settings > Secrets and variables > Actions, ajouter :
+   - `VPS_SSH_KEY` — la clé **privée**
+   - `VPS_HOST` — l'IP ou le nom d'hôte du VPS
+   - `VPS_USER` — `xyro`
+   - `VPS_PORT` — le port SSH (facultatif, 22 par défaut)
 
-[Install]
-WantedBy=multi-user.target
-```
+### Après la mise en place
 
-Dupliquer pour `xyro-bot.service` (`src/bot/main.js`) et `xyro-jobs.service` (`src/jobs/main.js`).
-
-6. Reverse proxy TLS devant `web` (Caddy recommandé pour la simplicité de configuration).
+Chaque `git push` sur `main` déclenche `.github/workflows/deploy.yml` : tests (`.github/workflows/ci.yml` en fait autant sur les PR), puis `deploy/deploy.sh` exécuté sur le VPS via SSH (`git pull`, `npm ci`, `npm run migrate`, redémarrage des 3 services). Un déploiement manuel reste possible : `ssh xyro@<vps> bash /opt/xyro-market/deploy/deploy.sh`, ou `workflow_dispatch` depuis l'onglet Actions de GitHub.
 
 ## À vérifier avant toute mise en ligne réelle
 

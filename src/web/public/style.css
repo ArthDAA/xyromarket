@@ -75,6 +75,25 @@ header .brand::before {
   background: var(--banner);
 }
 
+.discord-join {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--brand);
+  color: #fff;
+  transition: background-color 0.12s ease, transform 0.12s ease;
+}
+
+.discord-join:hover {
+  background: var(--brand-hover);
+  text-decoration: none;
+  transform: scale(1.08);
+}
+
 /* Search bar, centered in the header on every page (A38) */
 
 .header-search {
@@ -359,13 +378,64 @@ img {
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: var(--brand);
+  background: var(--banner);
   color: #fff;
   font-weight: 700;
   font-size: 0.85rem;
   margin-right: 0.6rem;
   vertical-align: middle;
   flex-shrink: 0;
+}
+
+/*
+ * One of 8 curated gradients, picked deterministically per guild
+ * (`render.js:guildHueClass`) — a guild with neither icon nor banner/splash
+ * otherwise rendered the exact same flat blurple as every other one. Same
+ * class name doubles as the card-banner placeholder and the letter-fallback
+ * tint, so a given guild's two placeholder pieces always match each other.
+ * Written as `.card-banner.hue-N, .icon-fallback.hue-N` (two classes, not
+ * one) so this reliably outranks `.card-banner`'s own `background` further
+ * down the file regardless of source order — a single-class `.hue-N` would
+ * tie on specificity and lose to whichever rule happens to come later.
+ */
+.card-banner.hue-0,
+.icon-fallback.hue-0 {
+  background: linear-gradient(135deg, #5865f2 0%, #7289da 55%, #3a45c4 100%);
+}
+
+.card-banner.hue-1,
+.icon-fallback.hue-1 {
+  background: linear-gradient(135deg, #23a559 0%, #3ba55d 55%, #1a7a40 100%);
+}
+
+.card-banner.hue-2,
+.icon-fallback.hue-2 {
+  background: linear-gradient(135deg, #f23f42 0%, #ed4245 55%, #a12828 100%);
+}
+
+.card-banner.hue-3,
+.icon-fallback.hue-3 {
+  background: linear-gradient(135deg, #f0b232 0%, #faa61a 55%, #b8790f 100%);
+}
+
+.card-banner.hue-4,
+.icon-fallback.hue-4 {
+  background: linear-gradient(135deg, #eb459e 0%, #f47fbb 55%, #a52d6d 100%);
+}
+
+.card-banner.hue-5,
+.icon-fallback.hue-5 {
+  background: linear-gradient(135deg, #11a8cd 0%, #4fd1e8 55%, #0c7a95 100%);
+}
+
+.card-banner.hue-6,
+.icon-fallback.hue-6 {
+  background: linear-gradient(135deg, #9c84ef 0%, #b9a5f5 55%, #6c51c9 100%);
+}
+
+.card-banner.hue-7,
+.icon-fallback.hue-7 {
+  background: linear-gradient(135deg, #ff8c42 0%, #ffab6e 55%, #cc6a1e 100%);
 }
 
 h1 img,

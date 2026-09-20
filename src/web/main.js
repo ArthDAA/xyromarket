@@ -13,6 +13,7 @@ import { hasPendingMigrations } from '../db/migrations/run.js';
 import publicRoutes from './routes/public.js';
 import userRoutes from './routes/user.js';
 import adminRoutes from './routes/admin.js';
+import { refreshHubInviteUrl } from './hubInvite.js';
 
 async function main() {
   const pool = await createPool('web');
@@ -62,6 +63,15 @@ async function main() {
   // imported by the time these plugins register their own per-route preHandlers).
   await app.register(userRoutes, { pool });
   await app.register(adminRoutes, { pool });
+
+  // Primes the header's "Rejoindre le Discord" button (render.js:layout) before the first
+  // request, then keeps it fresh on a slow interval — see hubInvite.js for why this can't
+  // just be an ordinary per-request DB read.
+  await refreshHubInviteUrl(pool);
+  const hubInviteRefreshTimer = setInterval(() => {
+    refreshHubInviteUrl(pool).catch((err) => app.log.warn({ err }, 'hub invite URL refresh failed'));
+  }, 10 * 60 * 1000);
+  hubInviteRefreshTimer.unref();
 
   app.get('/healthz', async () => ({ status: 'ok' }));
 
