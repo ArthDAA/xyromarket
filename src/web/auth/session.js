@@ -105,7 +105,11 @@ export function tryAuth(pool) {
       if (!session) return null;
       const user = await usersRepo.findById(tx, session.userId);
       if (!user || user.deletedAt) return null;
-      return { session, user };
+      // Needed for the header's "Panel admin" menu entry (A42) — same
+      // `rbac.resolve` `requireAuth` already calls, with the same 60s
+      // in-process cache absorbing the repeat lookup on every page view.
+      const caps = await rbac.resolve(tx, user.id);
+      return { session, user, caps };
     });
 
     if (result) {
@@ -116,6 +120,7 @@ export function tryAuth(pool) {
         isVerified: result.user.isVerified,
         avatarHash: result.user.avatarHash,
       };
+      req.caps = result.caps;
       // Lets a public-but-adaptive page (e.g. a listing's "je suis intéressé" form)
       // issue a CSRF-protected POST for a logged-in visitor without forcing the
       // redirect-to-login `requireAuth` would — the whole point of `tryAuth`.

@@ -235,13 +235,14 @@ function discordJoinButtonHtml() {
  * profil", "Mes annonces" and "Se déconnecter". `/auth/logout` has never
  * required CSRF (cf. its handler) — this form doesn't invent that requirement.
  */
-function headerAccountHtml(user) {
+function headerAccountHtml(user, caps) {
   if (!user) return '<a href="/auth/discord" class="header-login">Se connecter</a>';
   return `<details class="profile-menu">
 <summary>${userAvatarHtml(user)}</summary>
 <div class="profile-menu-panel">
 <a href="/u/${user.id}">Mon profil</a>
 <a href="/tableau-de-bord">Mes annonces</a>
+${caps?.size > 0 ? '<a href="/admin">Panel admin</a>' : ''}
 <form method="POST" action="/auth/logout"><button type="submit">Se déconnecter</button></form>
 </div>
 </details>`;
@@ -254,8 +255,12 @@ function headerAccountHtml(user) {
  * (the caller's `req.user`, or `undefined`/`null` when signed out) drives
  * the header's account slot — every route wires this through so the search
  * bar and profile menu are consistent site-wide, not per-page ad hoc markup.
+ * `caps` (the caller's `req.caps`, a `Set<Permission>`) only gates whether
+ * the "Panel admin" entry shows in that menu — cosmetic, not a security
+ * boundary: every `/admin/*` route re-checks the real permission itself
+ * regardless of whether this link was ever shown.
  */
-export function layout({ title, body, user, searchQuery, noindex = false }) {
+export function layout({ title, body, user, caps, searchQuery, noindex = false }) {
   return `<!doctype html>
 <html lang="fr">
 <head>
@@ -273,7 +278,7 @@ ${discordJoinButtonHtml()}
 <input type="search" name="search" value="${escapeHtml(searchQuery ?? '')}" placeholder="Rechercher..." aria-label="Rechercher un utilisateur, un serveur ou un tag">
 <button type="submit">Chercher</button>
 </form>
-${headerAccountHtml(user)}
+${headerAccountHtml(user, caps)}
 </header>
 <main>${body}</main>
 <footer>
@@ -290,10 +295,11 @@ ${headerAccountHtml(user)}
  * this bloc — real text for Le_Club must come from the client / legal
  * review before production, not be invented here.
  */
-export function legalPage(title, user) {
+export function legalPage(title, user, caps) {
   return layout({
     title,
     user,
+    caps,
     body: `<h1>${escapeHtml(title)}</h1>
 <p><em>Contenu à rédiger — cette page est un gabarit structurel, pas un texte juridique final.</em></p>`,
   });

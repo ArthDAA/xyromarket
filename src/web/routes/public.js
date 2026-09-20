@@ -72,7 +72,7 @@ function listingsListHtml(items, { guildById, userById }) {
 }
 
 /** 404 with an actual explanation instead of a bare "404" — same shape as `renderFormError` in user.js. */
-function notFoundPage(reply, message, user) {
+function notFoundPage(reply, message, user, caps) {
   return reply
     .code(404)
     .type('text/html')
@@ -80,6 +80,7 @@ function notFoundPage(reply, message, user) {
       layout({
         title: 'Introuvable',
         user,
+        caps,
         body: `<h1>Introuvable</h1><p>${escapeHtml(message)}</p><p><a href="/">Retour à l'accueil</a></p>`,
       }),
     );
@@ -104,7 +105,7 @@ export default async function publicRoutes(app, { pool }) {
       // anonymous one would be a real leak, however unlikely on this app's current single-VPS
       // deployment. The legal *content* itself is still static; only the caching directive changed.
       reply.header('Cache-Control', 'private, max-age=0');
-      reply.type('text/html').send(legalPage(title, req.user));
+      reply.type('text/html').send(legalPage(title, req.user, req.caps));
     });
   }
 
@@ -159,7 +160,7 @@ export default async function publicRoutes(app, { pool }) {
       reply.redirect('/tableau-de-bord');
     } catch (err) {
       req.log.warn({ err }, 'oauth callback failed');
-      reply.code(400).type('text/html').send(layout({ title: 'Connexion échouée', user: req.user, body: '<h1>Connexion échouée</h1>' }));
+      reply.code(400).type('text/html').send(layout({ title: 'Connexion échouée', user: req.user, caps: req.caps, body: '<h1>Connexion échouée</h1>' }));
     }
   });
 
@@ -184,6 +185,7 @@ export default async function publicRoutes(app, { pool }) {
       layout({
         title: 'Accueil',
         user: req.user,
+        caps: req.caps,
         body: `<h1>Xyro Market</h1>
 <p>Échangez ou donnez votre serveur Discord. <a href="/annonces">Rechercher / filtrer les annonces</a></p>
 <h2>Annonces</h2>
@@ -209,6 +211,7 @@ ${page.cursor ? `<p><a href="/annonces?cursor=${encodeURIComponent(page.cursor)}
         layout({
           title: 'Recherche',
           user: req.user,
+        caps: req.caps,
           searchQuery: search.trim(),
           body: `<h1>Recherche : ${escapeHtml(search.trim())}</h1>
 <h2>Utilisateurs (${userHits.length})</h2>
@@ -237,6 +240,7 @@ ${listingsListHtml(hits, { guildById, userById })}`,
       layout({
         title: 'Annonces',
         user: req.user,
+        caps: req.caps,
         body: `<h1>Annonces</h1>
 ${listingsListHtml(page.items, { guildById, userById })}
 ${page.cursor ? `<p><a href="/annonces?cursor=${encodeURIComponent(page.cursor)}">Suivant</a></p>` : ''}`,
@@ -274,7 +278,7 @@ ${page.cursor ? `<p><a href="/annonces?cursor=${encodeURIComponent(page.cursor)}
       return { listing, guild, owner, isOwner, alreadyQueued, myEchangeListings };
     });
     if (!result) {
-      return notFoundPage(reply, 'Cette annonce n\'existe pas, ou a été retirée par son propriétaire.', req.user);
+      return notFoundPage(reply, 'Cette annonce n\'existe pas, ou a été retirée par son propriétaire.', req.user, req.caps);
     }
     const { listing, guild, owner, isOwner, alreadyQueued, myEchangeListings } = result;
 
@@ -318,6 +322,7 @@ ${myEchangeListings.map((l) => `<option value="${escapeHtml(l.id)}">${escapeHtml
       layout({
         title: guild?.name || 'Annonce',
         user: req.user,
+        caps: req.caps,
         body: `<h1>${guildIconHtml(guild)}${escapeHtml(guild?.name || listing.guildId)}</h1>
 <p><span class="pill">${listing.mode === 'don' ? 'Don' : 'Échange'}</span>${owner ? ` publiée par ${userAvatarHtml(owner)}<a href="/u/${owner.id}">${escapeHtml(owner.username)}</a>` : ''}</p>
 <p>${escapeHtml(listing.description)}</p>
@@ -351,13 +356,14 @@ ${contactSection}`,
       };
     });
     if (!result) {
-      return notFoundPage(reply, 'Ce profil n\'existe pas, ou son compte a été supprimé.', req.user);
+      return notFoundPage(reply, 'Ce profil n\'existe pas, ou son compte a été supprimé.', req.user, req.caps);
     }
     const { user, aggregate, listings, guildById, reviews, authorById } = result;
     reply.type('text/html').send(
       layout({
         title: user.username,
         user: req.user, // the visitor's own session (header nav) — distinct from the `user` being viewed below
+        caps: req.caps,
         // No raw discord_id shown as text on a public profile — userAvatarHtml/userBannerUrl only
         // ever use it inside a CDN image URL, structurally required, never as visible text.
         body: `<div class="profile-header">

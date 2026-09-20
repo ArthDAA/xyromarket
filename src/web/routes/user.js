@@ -113,7 +113,7 @@ function withAccept(handler) {
     } catch (err) {
       if (err instanceof z.ZodError) {
         if (isFormSubmission(req)) {
-          return renderFormError(reply, err.issues.map((i) => i.message).join(' — '), 422, req.user);
+          return renderFormError(reply, err.issues.map((i) => i.message).join(' — '), 422, req.user, req.caps);
         }
         return reply.code(422).send({ error: 'ERR_VALIDATION', issues: err.issues });
       }
@@ -124,7 +124,7 @@ function withAccept(handler) {
       }
       if (isFormSubmission(req)) {
         const message = FORM_ERROR_MESSAGES[err.code] ?? `${err.code ?? 'ERR_UNEXPECTED'} — ${err.message ?? ''}`;
-        return renderFormError(reply, message, mapped.status, req.user);
+        return renderFormError(reply, message, mapped.status, req.user, req.caps);
       }
       return reply.code(mapped.status).send(mapped.body);
     }
@@ -136,7 +136,7 @@ function isFormSubmission(req) {
   return Boolean(req.headers['content-type']?.includes('application/x-www-form-urlencoded'));
 }
 
-function renderFormError(reply, message, status = 422, user) {
+function renderFormError(reply, message, status = 422, user, caps) {
   // No `javascript:` back-link: CSP's script-src ('self' only, no unsafe-inline) blocks it anyway.
   return reply
     .code(status)
@@ -145,6 +145,7 @@ function renderFormError(reply, message, status = 422, user) {
       layout({
         title: 'Erreur',
         user,
+        caps,
         body: `<h1>Une erreur est survenue</h1><p>${escapeHtml(message)}</p><p><a href="/tableau-de-bord">Retour au tableau de bord</a></p>`,
       }),
     );
@@ -230,6 +231,7 @@ export default async function userRoutes(app, { pool }) {
       layout({
         title: 'Tableau de bord',
         user: req.user,
+        caps: req.caps,
         noindex: true,
         body: `<div class="profile-header">
 <div class="profile-banner">${bannerImgHtml(userBannerUrl(fullUser, 600))}</div>
@@ -241,9 +243,7 @@ ${userAvatarHtml(fullUser, { requestSize: 256 })}
 <p>${starsHtml(Math.round(aggregate.average ?? 0))} ${aggregate.count} avis${aggregate.average != null ? ` (moyenne ${aggregate.average.toFixed(1)}/5)` : ''} · <a href="/u/${fullUser.id}">Voir mon profil public</a></p>
 </div>
 </div>
-<p><a href="/annonces/nouvelle">Créer une annonce</a> · <a href="/matchs">Mes propositions</a> · <a href="/me/export">Exporter mes données</a>${
-  req.caps.size > 0 ? ' · <a href="/admin">Panel admin</a>' : ''
-} ·
+<p><a href="/annonces/nouvelle">Créer une annonce</a> · <a href="/matchs">Mes propositions</a> · <a href="/me/export">Exporter mes données</a> ·
 <form method="POST" action="/auth/logout" class="inline"><button type="submit">Se déconnecter</button></form></p>
 ${
   hubInviteUrl
@@ -335,6 +335,7 @@ ${
       layout({
         title: 'Nouvelle annonce',
         user: req.user,
+        caps: req.caps,
         noindex: true,
         body: `<h1>Créer une annonce</h1>
 ${guilds.length === 0 ? '<p>Aucun serveur disponible — chaque serveur dont tu es propriétaire a déjà une annonce active ou en attente. Reviens une fois propriétaire d\'un nouveau serveur Discord.</p>' : ''}
@@ -385,6 +386,7 @@ ${guilds.map((g) => `<option value="${escapeHtml(g.id)}">${escapeHtml(g.name || 
       layout({
         title: 'Modifier l\'annonce',
         user: req.user,
+        caps: req.caps,
         noindex: true,
         body: `<h1>Modifier l'annonce</h1>
 <p>Mode : ${escapeHtml(listing.mode)} (non modifiable — retire l'annonce depuis le <a href="/tableau-de-bord">tableau de bord</a> et recrée-la pour changer de mode)</p>
@@ -516,6 +518,7 @@ ${
       layout({
         title: 'Mes propositions',
         user: req.user,
+        caps: req.caps,
         noindex: true,
         body: `<h1>Mes propositions</h1>
 ${
@@ -596,6 +599,7 @@ ${
         layout({
           title: 'Introuvable',
           user: req.user,
+          caps: req.caps,
           body: '<h1>404</h1><p><a href="/tableau-de-bord">Retour au tableau de bord</a></p>',
         }),
       );
@@ -610,6 +614,7 @@ ${
       layout({
         title: 'Transaction',
         user: req.user,
+        caps: req.caps,
         noindex: true,
         body: `<h1>${escapeHtml(guild?.name || t.guildId)}</h1>
 <p>Avec : ${escapeHtml(otherParty?.username ?? 'utilisateur supprimé')} · Statut : <strong>${escapeHtml(TRANSACTION_STATUS_LABELS[t.status] ?? t.status)}</strong></p>
