@@ -2,7 +2,7 @@ import { REST, Routes } from 'discord.js';
 import pino from 'pino';
 import { Config } from '../config/env.js';
 import { LOCK_KEYS, jobLockKey } from '../config/lockKeys.js';
-import { createPool, closePool, withAdvisoryLock, withTransaction } from '../db/pool.js';
+import { createPool, closePool, withAdvisoryLock, withTransaction, acquireProcessSingleton } from '../db/pool.js';
 import { hasPendingMigrations } from '../db/migrations/run.js';
 import { createBusListener, sweepOutbox, publish, CHANNELS } from '../bus/events.js';
 import { guildsRepo } from '../db/repositories/guildsRepo.js';
@@ -253,14 +253,7 @@ async function main() {
     process.exit(1);
   }
 
-  const singletonClient = await pool.connect();
-  const { rows } = await singletonClient.query('SELECT pg_try_advisory_lock($1) AS locked', [LOCK_KEYS.JOBS_SINGLETON]);
-  if (!rows[0].locked) {
-    logger.info('ERR_JOBS_SINGLETON_HELD — another jobs process is running, exiting');
-    singletonClient.release();
-    await closePool(pool);
-    process.exit(0);
-  }
+  const singletonClient = await acquireProcessSingleton(pool, LOCK_KEYS.JOBS_SINGLETON, { logger, name: 'jobs' });
 
   const bus = createBusListener(pool, { logger });
   bus.subscribe(CHANNELS.EVENT_LISTING_CHANGED, () => {

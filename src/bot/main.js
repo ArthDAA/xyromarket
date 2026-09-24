@@ -2,7 +2,7 @@ import { Client, GatewayIntentBits, Events, REST, Routes, SlashCommandBuilder } 
 import pino from 'pino';
 import { Config } from '../config/env.js';
 import { LOCK_KEYS } from '../config/lockKeys.js';
-import { createPool, closePool, withTransaction } from '../db/pool.js';
+import { createPool, closePool, withTransaction, acquireProcessSingleton } from '../db/pool.js';
 import { hasPendingMigrations } from '../db/migrations/run.js';
 import { createBusListener, CHANNELS } from '../bus/events.js';
 import * as guildWatcher from './guildWatcher.js';
@@ -37,17 +37,9 @@ async function main() {
 
   // Single bot process at a time (no double announcement, no double role assignment) — held for
   // the whole process lifetime, so we take it on a dedicated connection rather than through
-  // `withAdvisoryLock` (which is scoped to release when its callback returns).
-  const singletonClient = await pool.connect();
-  const { rows: lockRows } = await singletonClient.query('SELECT pg_try_advisory_lock($1) AS locked', [
-    LOCK_KEYS.BOT_SINGLETON,
-  ]);
-  if (!lockRows[0].locked) {
-    logger.info('ERR_SINGLETON_HELD — another bot process is running, exiting');
-    singletonClient.release();
-    await closePool(pool);
-    process.exit(0);
-  }
+  // `withAdvisoryLock` (which is scoped to release when its callback returns). Waits for the lock
+  // rather than exiting, so a rolling deploy hands over cleanly (A45).
+  const singletonClient = await acquireProcessSingleton(pool, LOCK_KEYS.BOT_SINGLETON, { logger, name: 'bot' });
 
   // discord.js v14: only Guilds + GuildModeration, neither privileged — see docs/devnotes/3-DebugNotes.md (A22).
   const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildModeration] });

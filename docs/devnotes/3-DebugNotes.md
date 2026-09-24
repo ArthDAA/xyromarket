@@ -467,3 +467,17 @@ Demande utilisateur : remplacer le logo renard (A43) par une nouvelle image four
 Au passage : Docker Desktop était arrêté (base injoignable, `test:db` en échec « DB_UNAVAILABLE ») — redémarré, `xyro-dev-pg`/`xyro-test-pg` relancés, `xyro_test` réinitialisée avant le run.
 
 Vérifié en direct dans Chrome : panda visible dans l'en-tête, `/` sert `logo.png?v=83b02337` et `favicon.png?v=338b8687`, aucune erreur console. Lint + test (6) + test:db (21) au vert.
+
+## 2026-09-24 [A45 - bot et jobs en boucle de redémarrages à chaque déploiement]
+
+Signalé juste après le push d'A44 : log prod `ERR_JOBS_SINGLETON_HELD — another jobs process is running, exiting`, et la console blitz.cloud montrant `Xyromarket Jobs` et `Xyromarket Bot` en « Needs attention », 4 redémarrages chacun (le web, sans verrou singleton, était « Online, new version just now »).
+
+**Cause** : `bot` et `jobs` prennent au boot un advisory lock Postgres de durée de vie du process (un seul bot, un seul jobs — pas de double annonce, pas de double attribution de rôle), et **sortaient** (`exit 0`) s'il était déjà pris. Conçu pour un démarrage manuel où un doublon est une erreur ; incompatible avec un déploiement progressif, où l'hébergeur démarre la nouvelle instance avant d'arrêter l'ancienne. La nouvelle voit le verrou tenu par l'ancienne, sort, est relancée, etc. Au mieux ça se résout quand l'hébergeur finit par tuer l'ancienne ; au pire le déploiement ne se termine jamais et l'ancien code reste en prod.
+
+**Fix** : `db/pool.js:acquireProcessSingleton` attend le verrou (essai toutes les 5 s) au lieu d'abandonner. L'ancienne instance le libère dans son handler SIGTERM (déjà en place), la nouvelle prend le relais au tick suivant. Pas de handler SIGTERM installé pendant l'attente → un arrêt demandé pendant qu'on attend termine le process immédiatement, rien à nettoyer. Logs : une ligne au premier essai, puis ~1/min, pour qu'un verrou qui ne se libère jamais reste visible.
+
+**Limite connue, non traitée** : si l'ancienne instance meurt brutalement (kill -9, nœud perdu), Postgres garde sa session — et donc le verrou — jusqu'à détecter la connexion morte (keepalive TCP, potentiellement long). La nouvelle attendra jusque-là au lieu de redémarrer en boucle : même délai, mais sans bruit.
+
+L'erreur 502 vue en même temps (« proxy error … while dialing 10.0.0.6:10250 ») vient de l'API de logs de blitz.cloud qui n'arrive pas à joindre le nœud du bot — côté hébergeur (bandeau « server limits » affiché), pas l'application.
+
+Vérifié en local : deux `node src/jobs/main.js` en parallèle — le second logue `SINGLETON_HELD … waiting for it`, puis `singleton lock acquired after waiting` (essai 3) dès l'arrêt du premier. Lint + test (6) + test:db (21, base réinitialisée) au vert. À confirmer sur le prochain déploiement réel.

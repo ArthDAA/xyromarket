@@ -213,3 +213,39 @@ export async function withAdvisoryLock(pool, key, fn, { transactional = false } 
     client.release();
   }
 }
+
+/**
+ * Takes a process-lifetime singleton advisory lock (`bot`, `jobs`) on a
+ * dedicated client and returns that client — the caller keeps it checked
+ * out until shutdown, then unlocks and releases it.
+ *
+ * Waits (polling every `retryMs`) instead of giving up when the lock is held:
+ * a rolling deploy starts the new process *before* stopping the old one, so
+ * exiting here made the new version crash-loop until the host happened to
+ * kill the old one (A45, seen live on blitz.cloud: 4 restarts each for `bot`
+ * and `jobs` on one push). Waiting lets the new process take over the moment
+ * the old one releases the lock on SIGTERM. No SIGTERM handler is installed
+ * yet while waiting, so a stop request during the wait still ends the
+ * process immediately — nothing is held to clean up.
+ *
+ * @param {pg.Pool} pool
+ * @param {bigint} key
+ * @param {{ logger: pino.Logger, name: string, retryMs?: number }} opts
+ * @returns {Promise<pg.PoolClient>}
+ */
+export async function acquireProcessSingleton(pool, key, { logger, name, retryMs = 5000 }) {
+  const client = await pool.connect();
+  for (let attempt = 1; ; attempt++) {
+    const { rows } = await client.query('SELECT pg_try_advisory_lock($1) AS locked', [key]);
+    if (rows[0].locked) {
+      if (attempt > 1) logger.info({ process: name, attempt }, 'singleton lock acquired after waiting');
+      return client;
+    }
+    // Once at first, then about once a minute — a lock that never frees (another instance really
+    // running, or a dead session Postgres hasn't reaped yet) should stay visible in the logs.
+    if (attempt === 1 || attempt % Math.max(1, Math.round(60000 / retryMs)) === 0) {
+      logger.info({ process: name, attempt }, 'SINGLETON_HELD — another instance holds the lock, waiting for it');
+    }
+    await new Promise((resolve) => setTimeout(resolve, retryMs));
+  }
+}
