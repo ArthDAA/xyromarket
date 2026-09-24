@@ -457,3 +457,13 @@ Demande utilisateur en deux temps : d'abord un thème visuel ("reprends les code
 Profité du passage pour retirer `border="1" cellpadding="4"` des 7 `<table>` d'`admin.js` (rendu désormais 100% CSS). Délibérément pas d'icônes/avatars dans le panel admin — tables déjà denses, la lisibilité prime sur l'esthétique là-bas.
 
 Vérifié en direct dans Chrome (accueil, tableau de bord, panel admin, fiche annonce, profil public `arde_ass`/`dy_epic`) après hard-reload : avatar réel de `dy_epic` affiché correctement, repli en lettre colorée confirmé sur les guildes de test sans icône, repli sur l'avatar Discord par défaut confirmé sur les comptes de test sans avatar ni snowflake valide, aucune erreur console/CSP. Lint + test (6) + test:db (21) au vert.
+
+## 2026-09-24 [A44 - nouveau logo (panda), et un cache de 30 jours qui l'aurait masqué]
+
+Demande utilisateur : remplacer le logo renard (A43) par une nouvelle image fournie (1254×1254, panda orange/blanc, badge rond noir cerclé d'orange). Redimensionnée en local via System.Drawing (bicubique haute qualité) vers `logo.png` 128×128 et `favicon.png` 32×32 — aucune dépendance ajoutée.
+
+**Bug latent trouvé en le faisant** : même cause que le point 4 d'A35, mais pour les images. `/static/*` part avec `Cache-Control: public, max-age=2592000, immutable` ; `style.css` avait reçu un hash de contenu à l'époque, pas `logo.png`/`favicon.png` (ajoutés en A43 sans y penser — invisible tant que l'image ne change pas). Un visiteur ayant chargé le site avec le renard l'aurait gardé jusqu'à 30 jours, sans aucun moyen de le voir côté serveur. Fix : `render.js` factorise le calcul en `assetVersion(file)` et versionne les trois fichiers (`?v=…`). Le fond `wallpaper.svg` (référencé depuis la CSS, pas depuis `layout()`) garde le même défaut, mais son contenu n'a pas changé ici.
+
+Au passage : Docker Desktop était arrêté (base injoignable, `test:db` en échec « DB_UNAVAILABLE ») — redémarré, `xyro-dev-pg`/`xyro-test-pg` relancés, `xyro_test` réinitialisée avant le run.
+
+Vérifié en direct dans Chrome : panda visible dans l'en-tête, `/` sert `logo.png?v=83b02337` et `favicon.png?v=338b8687`, aucune erreur console. Lint + test (6) + test:db (21) au vert.

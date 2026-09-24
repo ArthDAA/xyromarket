@@ -9,16 +9,17 @@ import { getCachedHubInviteUrl } from './hubInvite.js';
 /**
  * `/static/*` is served with `immutable, max-age=30d` (`web/main.js`) — fine
  * for content that never changes post-deploy, wrong for a hand-edited
- * stylesheet with no build step: without a cache-buster, a browser that
- * loaded an older `style.css` would keep it for 30 days regardless of what
- * ships next. A content hash (computed once at boot, not per-request) beats
- * a manually bumped version number — it can't go stale by forgetting to
- * bump it.
+ * stylesheet or image with no build step: without a cache-buster, a browser
+ * that loaded an older `style.css`/`logo.png` would keep it for 30 days
+ * regardless of what ships next. A content hash (computed once at boot, not
+ * per-request) beats a manually bumped version number — it can't go stale by
+ * forgetting to bump it.
  */
-const STYLE_VERSION = createHash('sha1')
-  .update(readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'public', 'style.css')))
-  .digest('hex')
-  .slice(0, 8);
+const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
+const assetVersion = (file) => createHash('sha1').update(readFileSync(path.join(PUBLIC_DIR, file))).digest('hex').slice(0, 8);
+const STYLE_VERSION = assetVersion('style.css');
+const LOGO_VERSION = assetVersion('logo.png');
+const FAVICON_VERSION = assetVersion('favicon.png');
 
 export function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (c) => (
@@ -268,12 +269,12 @@ export function layout({ title, body, user, caps, searchQuery, noindex = false }
 <meta name="viewport" content="width=device-width, initial-scale=1">
 ${noindex ? '<meta name="robots" content="noindex">' : ''}
 <title>${escapeHtml(title)} · Xyro Market</title>
-<link rel="icon" type="image/png" href="/static/favicon.png">
+<link rel="icon" type="image/png" href="/static/favicon.png?v=${FAVICON_VERSION}">
 <link rel="stylesheet" href="/static/style.css?v=${STYLE_VERSION}">
 </head>
 <body>
 <header>
-<a href="/" class="brand"><img src="/static/logo.png" alt="">Xyro Market</a>
+<a href="/" class="brand"><img src="/static/logo.png?v=${LOGO_VERSION}" alt="">Xyro Market</a>
 ${discordJoinButtonHtml()}
 <form method="GET" action="/annonces" class="header-search">
 <input type="search" name="search" value="${escapeHtml(searchQuery ?? '')}" placeholder="Rechercher..." aria-label="Rechercher un utilisateur, un serveur ou un tag">
