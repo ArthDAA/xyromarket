@@ -5,6 +5,7 @@ import { listingsRepo } from '../db/repositories/listingsRepo.js';
 import { listingQueueRepo } from '../db/repositories/listingQueueRepo.js';
 import { matchRepo } from '../db/repositories/matchRepo.js';
 import { pendingNotificationsRepo } from '../db/repositories/pendingNotificationsRepo.js';
+import { sessionsRepo } from '../db/repositories/sessionsRepo.js';
 import * as rbac from './rbac.js';
 import * as audit from './audit.js';
 import * as engine from './matching/engine.js';
@@ -98,7 +99,41 @@ export async function sanction(tx, actorId, userId, { kind, reason, endsAt = nul
   }
   const caps = await rbac.resolve(tx, actorId);
   if (!rbac.can(caps, 'moderation.sanction')) throw forbidden();
+  return applySanction(tx, actorId, userId, { kind, reason, endsAt });
+}
 
+/** Panel "Ban" button: permanent platform ban, gated by `users.ban` alone, and logs the account out everywhere. */
+export async function ban(tx, actorId, userId, reason) {
+  if (actorId === userId) {
+    throw new ModerationError('ERR_SELF_SANCTION', 'Cannot sanction yourself');
+  }
+  const caps = await rbac.resolve(tx, actorId);
+  if (!rbac.can(caps, 'users.ban')) throw forbidden();
+  const created = await applySanction(tx, actorId, userId, { kind: 'ban_perm', reason });
+  await sessionsRepo.revokeAllForUser(tx, userId);
+  return created;
+}
+
+/** Panel "Kick" button: revokes every session of the account — no sanction, they can log back in. */
+export async function kick(tx, actorId, userId, reason) {
+  if (actorId === userId) {
+    throw new ModerationError('ERR_SELF_SANCTION', 'Cannot sanction yourself');
+  }
+  const caps = await rbac.resolve(tx, actorId);
+  if (!rbac.can(caps, 'users.kick')) throw forbidden();
+  const user = await usersRepo.findById(tx, userId);
+  if (!user) throw new ModerationError('ERR_TARGET_MISSING', 'Target user not found');
+  await sessionsRepo.revokeAllForUser(tx, userId);
+  await audit.record(tx, {
+    actorId,
+    action: 'moderation.kick',
+    targetType: 'user',
+    targetId: userId,
+    after: { reason },
+  });
+}
+
+async function applySanction(tx, actorId, userId, { kind, reason, endsAt = null }) {
   const user = await usersRepo.findById(tx, userId);
   if (!user) throw new ModerationError('ERR_TARGET_MISSING', 'Target user not found');
 

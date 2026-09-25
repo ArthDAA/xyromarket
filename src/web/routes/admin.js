@@ -26,6 +26,7 @@ const sanctionSchema = z.object({
   reason: z.string().min(1),
   endsAt: z.string().datetime().optional(),
 });
+const reasonSchema = z.object({ reason: z.string().trim().min(1, 'Le motif est obligatoire.') });
 const settingSchema = z.object({ value: z.unknown() });
 const roleAssignSchema = z.object({ roleKey: z.string() });
 const permissionSchema = z.object({ permissionKey: z.string() });
@@ -40,7 +41,7 @@ const ADMIN_ERROR_MESSAGES = {
   ERR_ESCALATION: 'Tu ne peux pas accorder un rôle ou une permission que tu ne possèdes pas toi-même.',
   ERR_LAST_OWNER: 'Impossible de retirer le rôle "Propriétaire" au dernier compte qui le détient.',
   ERR_SELF_SANCTION: 'Tu ne peux pas te sanctionner toi-même.',
-  ERR_ALREADY_SANCTIONED: 'Une sanction de ce type est déjà active pour cet utilisateur.',
+  ERR_ALREADY_SANCTIONED: 'Une sanction de ce type est déjà active pour cet utilisateur (déjà banni ?).',
   ERR_TARGET_MISSING: 'Utilisateur cible introuvable.',
   NOT_FOUND: 'Introuvable.',
   ERR_LISTING_LOCKED: 'Cette annonce est engagée dans une transaction en cours.',
@@ -296,6 +297,31 @@ ${csrfField(csrfToken)}
         )
         .join('')}</ul>`
 }
+${
+  user.id !== req.user.id && (req.caps.has('users.kick') || req.caps.has('users.ban'))
+    ? `<h2>Actions rapides</h2>
+${
+  req.caps.has('users.kick')
+    ? `<form method="POST" action="/admin/users/${user.id}/kick" class="inline">
+${csrfField(csrfToken)}
+<input type="text" name="reason" placeholder="Motif du kick" required>
+<button type="submit">Kick</button>
+</form>`
+    : ''
+}
+${
+  req.caps.has('users.ban')
+    ? `<form method="POST" action="/admin/users/${user.id}/ban" class="inline">
+${csrfField(csrfToken)}
+<input type="text" name="reason" placeholder="Motif du ban" required>
+<button type="submit">Ban</button>
+</form>`
+    : ''
+}
+<p>Kick : déconnecte le compte partout, il peut se reconnecter. Ban : ban définitif de la plateforme (levable ci-dessus dans « Sanctions actives »).</p>`
+    : ''
+}
+
 <details><summary>Prononcer une sanction</summary>
 <form method="POST" action="/admin/users/${user.id}/sanction">
 ${csrfField(csrfToken)}
@@ -371,6 +397,20 @@ ${allPermissions.map((p) => `<option value="${escapeHtml(p.key)}">${escapeHtml(p
       : req.body;
     const body = sanctionSchema.parse(raw);
     const sanction = await withTransaction(pool, (tx) => moderation.sanction(tx, req.user.id, req.params.id, body));
+    if (isFormSubmission(req)) return reply.redirect(`/admin/users/${req.params.id}`, 303);
+    reply.code(201).send({ sanction });
+  }));
+
+  app.post('/admin/users/:id/kick', { preHandler: [...guard('users.kick'), csrf] }, withAccept(async (req, reply) => {
+    const { reason } = reasonSchema.parse({ reason: req.body?.reason });
+    await withTransaction(pool, (tx) => moderation.kick(tx, req.user.id, req.params.id, reason));
+    if (isFormSubmission(req)) return reply.redirect(`/admin/users/${req.params.id}`, 303);
+    reply.code(204).send();
+  }));
+
+  app.post('/admin/users/:id/ban', { preHandler: [...guard('users.ban'), csrf] }, withAccept(async (req, reply) => {
+    const { reason } = reasonSchema.parse({ reason: req.body?.reason });
+    const sanction = await withTransaction(pool, (tx) => moderation.ban(tx, req.user.id, req.params.id, reason));
     if (isFormSubmission(req)) return reply.redirect(`/admin/users/${req.params.id}`, 303);
     reply.code(201).send({ sanction });
   }));

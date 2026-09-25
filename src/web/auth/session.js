@@ -5,10 +5,36 @@ import { sessionsRepo } from '../../db/repositories/sessionsRepo.js';
 import { usersRepo } from '../../db/repositories/usersRepo.js';
 import { sanctionsRepo } from '../../db/repositories/sanctionsRepo.js';
 import * as rbac from '../../domain/rbac.js';
+import { layout, escapeHtml } from '../render.js';
 
 export const SESSION_COOKIE = 'xm_sid';
 const SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
 const BLOCKING_SANCTION_KINDS = new Set(['ban_temp', 'ban_perm', 'suspend']);
+
+/** First active sanction that locks the account out of the platform, or `null`. */
+export async function findBlockingSanction(tx, userId) {
+  const active = await sanctionsRepo.findActiveByUser(tx, userId);
+  return active.find((s) => BLOCKING_SANCTION_KINDS.has(s.kind)) ?? null;
+}
+
+/** 403 for a banned/suspended account — JSON for API callers, a readable page for a browser. */
+export function respondSanctioned(req, reply, sanction) {
+  if (req.headers.accept?.includes('application/json')) {
+    return reply.code(403).send({ error: 'ERR_SANCTIONED', reason: sanction.reason, endsAt: sanction.endsAt });
+  }
+  const until = sanction.endsAt
+    ? `jusqu'au ${escapeHtml(new Date(sanction.endsAt).toLocaleString('fr-FR'))}`
+    : 'définitivement';
+  return reply.code(403).type('text/html').send(
+    layout({
+      title: 'Compte banni',
+      noindex: true,
+      body: `<h1>Compte banni</h1>
+<p>Ton compte a été banni de Xyro Market ${until}.</p>
+<p>Motif : ${escapeHtml(sanction.reason)}</p>`,
+    }),
+  );
+}
 
 /** Creates a session row after a successful OAuth callback. Cookie itself is set by the route (signed, HttpOnly, Secure, SameSite=Lax). */
 export async function createSession(pool, userId) {
@@ -59,7 +85,7 @@ export function requireAuth(pool) {
       if (!user || user.deletedAt) return null;
 
       const activeSanctions = await sanctionsRepo.findActiveByUser(tx, user.id);
-      const blocking = activeSanctions.find((s) => BLOCKING_SANCTION_KINDS.has(s.kind));
+      const blocking = activeSanctions.find((s) => BLOCKING_SANCTION_KINDS.has(s.kind)) ?? null;
       const caps = await rbac.resolve(tx, user.id);
       await sessionsRepo.renew(tx, session.id, new Date(Date.now() + SESSION_TTL_MS));
       return { session, user, activeSanctions, blocking, caps };
@@ -70,9 +96,8 @@ export function requireAuth(pool) {
       return respondUnauthenticated(req, reply); // ERR_SESSION_REVOKED
     }
     if (result.blocking) {
-      return reply
-        .code(403)
-        .send({ error: 'ERR_SANCTIONED', reason: result.blocking.reason, endsAt: result.blocking.endsAt });
+      reply.clearCookie(SESSION_COOKIE);
+      return respondSanctioned(req, reply, result.blocking);
     }
 
     req.user = {
@@ -105,6 +130,7 @@ export function tryAuth(pool) {
       if (!session) return null;
       const user = await usersRepo.findById(tx, session.userId);
       if (!user || user.deletedAt) return null;
+      if (await findBlockingSanction(tx, user.id)) return null;
       // Needed for the header's "Panel admin" menu entry (A42) — same
       // `rbac.resolve` `requireAuth` already calls, with the same 60s
       // in-process cache absorbing the repeat lookup on every page view.

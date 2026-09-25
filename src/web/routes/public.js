@@ -140,13 +140,16 @@ export default async function publicRoutes(app, { pool }) {
     reply.clearCookie(OAUTH_STATE_COOKIE);
 
     try {
-      const { user } = await withTransaction(pool, (tx) =>
-        oauth.handleCallback(tx, {
+      const { user, blocking } = await withTransaction(pool, async (tx) => {
+        const result = await oauth.handleCallback(tx, {
           code: req.query.code,
           state: req.query.state,
           expectedState: unsigned?.valid ? unsigned.value : null,
-        }),
-      );
+        });
+        return { ...result, blocking: await session.findBlockingSanction(tx, result.user.id) };
+      });
+      // A banned account never gets a session in the first place.
+      if (blocking) return session.respondSanctioned(req, reply, blocking);
       const { id, csrfSecret, expiresAt } = await session.createSession(pool, user.id);
       reply.setCookie(session.SESSION_COOKIE, id, {
         signed: true,
